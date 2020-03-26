@@ -1,113 +1,16 @@
-"""
-Author: Victor BG
-Date: November 15, 2019
-
-This script intends to train a gaze tracking network
-
-"""
-
-# ------- #
-# IMPORTS #
-# ------- #
-# from win32api import GetSystemMetrics
-import tensorflow as tf
-import numpy as np
-from tqdm import tqdm
+import argparse
 import datetime
 import glob
 import sys
-import cv2
 import os
+
+import tensorflow as tf
+from tqdm import tqdm
+import numpy as np
 import h5py
+import cv2
 
-
-# ----------------- #
-# CREATING DATA SET #
-# ----------------- #
-def create_data(num_expression, series_name, folder="./data/"):
-    # The resolution of the screen
-    scr_width = 1600
-    scr_height = 900
-
-    # The half-size of the target
-    targ_sz = 5
-
-    # Checking for conflict with series name
-    list_conflict = glob.glob(folder + series_name + "*.png")
-    if len(list_conflict) > 0:
-        answer = input("Conflict detected with this series name.\nDo you want to delete " \
-                       + "{} items? [y/N]".format(len(list_conflict)))
-
-        # Delete the conflicting files if 'y' or 'Y' is inputed
-        if answer == 'y' or answer == 'Y':
-            # if True:
-            for f in list_conflict:
-                os.remove(f)
-            os.remove(folder + series_name + "_labels.csv")
-
-        # Abort the program otherwise.
-        else:
-            print("Acquisition aborted")
-            return -1
-
-    # Label container
-    expression = []
-
-    # Opening video capture
-    video_capture = cv2.VideoCapture(0)
-    if not video_capture.isOpened():
-        raise Exception("Could not open webcam")
-
-    # Opening display window
-    # print(GetSystemMetrics(0))
-    cv2.namedWindow("Frame", cv2.WND_PROP_FULLSCREEN)
-    cv2.setWindowProperty("Frame", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-
-    # Display the gaze instructions and wait 1 second.
-    img = np.zeros((scr_height, scr_width), np.uint8)
-    font = cv2.FONT_HERSHEY_DUPLEX
-    cv2.putText(img, 'TRACK THE TARGET', (50, 300), font, 4, (255, 255, 255), 2, cv2.LINE_AA)
-    cv2.imshow('Frame', img)
-    cv2.waitKey(1000)
-
-    # Loop to capture frames
-    for ind in range(num_expression):
-        # Set the x and y coordinates
-        x_nor, y_nor = np.random.rand(), np.random.rand()
-        x_pix, y_pix = int(x_nor * scr_width), int(y_nor * scr_height)
-
-        # Draw the target
-        img = np.zeros((scr_height, scr_width, 3), np.uint8)
-        cv2.rectangle(img,
-                      (x_pix - targ_sz, y_pix - targ_sz,),
-                      (x_pix + targ_sz, y_pix + targ_sz),
-                      (1, 255, 1),
-                      2)
-
-        cv2.putText(img, str(ind + 1) + "/" + str(num_expression), (50, 850), font, 1, (255, 255, 255), 2, cv2.LINE_AA)
-        cv2.imshow('Frame', img)
-        cv2.waitKey(1000)
-
-        # Read image
-        ret, frame = video_capture.read()
-        img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        # Saving the image
-        try:
-            # Save image and label
-            expression.append([x_nor, y_nor])
-            nom = folder + series_name + "_" + str(ind).zfill(4) + ".png"
-            cv2.imwrite(nom, img_gray)
-        except:
-            print("Could not save the image.")
-
-    # Close webcam and instruction window
-    video_capture.release()
-    cv2.destroyAllWindows()
-
-    # Save the list of expressions
-    nom_fiche = folder + series_name + "_labels.csv"
-    np.savetxt(nom_fiche, expression, fmt='%f')
+from collect_data import create_data
 
 
 # ---------------- #
@@ -255,7 +158,7 @@ def formatDataset(data_dir, series_names, res_out=None, outpath=None):
             f.create_dataset("dataLabels", data=dataLabels)
 
     # Returning the data
-    return dataLeftEye, dataRightEye, dataLeftCoord, dataRightCoord, dataLabels
+    # return dataLeftEye, dataRightEye, dataLeftCoord, dataRightCoord, dataLabels
 
 
 # -------------------- #
@@ -384,8 +287,6 @@ def model_conv_eyes(eye_input_sz):
                                           input_rightcoord],
                                   outputs=[output])
     return model
-
-
 
 
 # Routine to train the neural network
@@ -539,9 +440,14 @@ def train_network(data, checkpointfolder=None, outpath=None, logpath=None, tfboa
 
 # quick routine to validate my calculus for the better-than-noise threshold
 def monte_carlo(iter_num):
+    """
+
+    :param iter_num: Number of iterations for the Monte Carlo simulation.
+    :return: mse
+    """
     v = np.random.random((iter_num, 2))
-    d1 = v[:, 0] - v[:, 1] # random guess
-    d2 = v[:,0] - 0.5 # fixed guess of 0.5
+    d1 = v[:, 0] - v[:, 1]  # random guess
+    d2 = v[:, 0] - 0.5  # fixed guess of 0.5
     s = d2 ** 2
     mse = np.mean(s)
     return mse
@@ -699,9 +605,25 @@ def webcam_gaze(modelpath, eye_gen):
     cv2.destroyAllWindows()
 
 
+def parse_inputs():
+    """
+    Parse the input arguments for actions tu run.
+
+    :return: args, Namespace containing the actions to run.
+    """
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("-c", "--collect-data", action="store_true", help="Collect new data")
+
+    args = parser.parse_args()
+    return args
+
+
 if __name__ == "__main__":
-    # To capture a dataset
-    # create_data(num_expression=60, series_name="abc5", folder="./data/")
+
+    args = parse_inputs()
+    if args.collect_data:
+        create_data()
 
     # Formatting the dataset
     # data = formatDataset(data_dir="./data/",
@@ -721,10 +643,10 @@ if __name__ == "__main__":
     #               )
 
     # Loading a checkpoint and saving the corresponding model.
-    model = model_conv_eyes((100, 100, 1))
-    save_complete_model(model=model,
-                        inpath="./model/checkpoint.ckpt",
-                        outpath="./model/savedmodels/1/")
+    # model = model_conv_eyes((100, 100, 1))
+    # save_complete_model(model=model,
+    #                     inpath="./model/checkpoint.ckpt",
+    #                     outpath="./model/savedmodels/1/")
 
     # img_gen = acquire_image()
     # eye_gen = extract_eye(img_gen, res_out=(100, 100))

@@ -1,4 +1,8 @@
+# Standard ignores
+.idea/
+__pycache__/
+
+# Local ignores
 data/
 model/
 config/
-.idea/
