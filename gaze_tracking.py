@@ -1,17 +1,12 @@
 import argparse
-import datetime
-import glob
-import sys
 import os
 
 import tensorflow as tf
-from tqdm import tqdm
 import numpy as np
 import h5py
 import cv2
 
-from collect_data import create_data
-
+import data
 
 # ---------------- #
 # LOADING DATA SET #
@@ -26,140 +21,6 @@ def loadHDF5(inpath):
         dataLabels = f['dataLabels'][()]
 
     return dataLeftEye, dataRightEye, dataLeftCoord, dataRightCoord, dataLabels
-
-
-# Formatting the dataset and outputting into HDF5 format
-def formatDataset(data_dir, series_names, res_out=None, outpath=None):
-    # Loading the labels
-    print("\nLoading the data")
-    labels = []
-    for sn in series_names:
-        file_name = glob.glob(data_dir + sn + "_labels.csv")[0]
-        lab = np.genfromtxt(file_name, dtype=float)
-        print("Loaded {} labels for series {}".format(len(lab), sn))
-        labels.append(lab)
-    labels = np.concatenate(labels)
-
-    # Loading the images
-    file_list = [glob.glob(data_dir + ser_name + "_*.png") for ser_name in series_names]
-    data = []
-    for ind_ser in range(len(file_list)):
-        count_img = 0
-        for ind in range(len(file_list[ind_ser])):
-            # Load an image in B&W
-            fname = file_list[ind_ser][ind]
-            img = cv2.imread(fname, 0)
-            data.append(img)
-            count_img += 1
-
-        print("Loaded {} images for series {}".format(count_img, fname))
-
-    # Loading the Haar cascade
-    eye_cascade = cv2.CascadeClassifier('./config/haarcascade_eye.xml')
-    if eye_cascade.empty():
-        raise NameError("Couldn't find the Haar Cascade XML file.")
-
-    # Loop information
-    data_sz = data[0].shape
-    faulty_data = 0
-
-    dataLeftEye = []
-    dataRightEye = []
-    dataLeftCoord = []
-    dataRightCoord = []
-    dataLabels = []
-
-    # Extracting the eye information
-    print("Extracting the eye information")
-    for i, img in tqdm(enumerate(data)):
-        # Applying the Haar cascade
-        eyes = eye_cascade.detectMultiScale(img)
-
-        # Making sure we detect exactly 2 eyes
-        try:
-            assert (eyes.shape[0] == 2)
-            # labels_valid.append(labels[i])
-        except AssertionError:
-            faulty_data += 1
-            continue
-
-        # Extracting the left and right eye coordinates
-        # Keep in mind that the image is naturally inverted: the left eye will be at the right of the picture
-        # They are ordered as [x, y, width, height]
-        # It is given in pixel values
-        if eyes[0, 0] < eyes[1, 0]:
-            lec = eyes[1, :]
-            rec = eyes[0, :]
-        else:
-            lec = eyes[0, :]
-            rec = eyes[1, :]
-
-        # Extracting the eyes
-        le = img[lec[1]:lec[1] + lec[3], lec[0]:lec[0] + lec[2]]
-        re = img[rec[1]:rec[1] + rec[3], rec[0]:rec[0] + rec[2]]
-
-        # Resizing the eyes
-        if res_out is not None and type(res_out) is tuple:
-            le = cv2.resize(le, res_out)
-            re = cv2.resize(re, res_out)
-
-        # Normalizing the image data
-        le = np.array(le) / 255.0
-        re = np.array(re) / 255.0
-
-        # Normalizing the coordinates
-        w = float(data_sz[1])
-        h = float(data_sz[0])
-        lec = np.array(lec, dtype=float)
-        rec = np.array(rec, dtype=float)
-        lec[0] /= w;
-        lec[2] /= w;
-        rec[0] /= w;
-        rec[2] /= w
-        lec[1] /= h;
-        lec[3] /= h;
-        rec[1] /= h;
-        rec[3] /= h
-
-        # Changing our coordinates to the center of the eye
-        lec[0] += lec[2] / 2;
-        lec[1] += lec[3] / 2
-        rec[0] += rec[2] / 2;
-        rec[1] += rec[3] / 2
-
-        # Resizing to add the color channel for compatibility with tensorflow convolution layers
-        le = le.reshape(res_out[0], res_out[1], 1)
-        re = re.reshape(res_out[0], res_out[1], 1)
-
-        # Appending to our data containers
-        dataLeftEye.append(le)
-        dataRightEye.append(re)
-        dataLeftCoord.append(lec)
-        dataRightCoord.append(rec)
-        dataLabels.append(labels[i])
-
-    # Printing the number of faulty images
-    print("There were {} faulty images".format(faulty_data))
-
-    # Converting to numpy arrays for HDF5 compatibility
-    dataLeftEye = np.array(dataLeftEye)
-    dataRightEye = np.array(dataRightEye)
-    dataLeftCoord = np.array(dataLeftCoord)
-    dataRightCoord = np.array(dataRightCoord)
-    dataLabels = np.array(dataLabels)
-
-    # Saving data to HDF5 file
-    if outpath is not None:
-        with h5py.File(outpath, 'w') as f:
-            f.create_dataset("dataLeftEye", data=dataLeftEye)
-            f.create_dataset("dataRightEye", data=dataRightEye)
-            f.create_dataset("dataLeftCoord", data=dataLeftCoord)
-            f.create_dataset("dataRightCoord", data=dataRightCoord)
-            f.create_dataset("dataLabels", data=dataLabels)
-
-    # Returning the data
-    # return dataLeftEye, dataRightEye, dataLeftCoord, dataRightCoord, dataLabels
-
 
 # -------------------- #
 # TRAIN NEURAL NETWORK #
@@ -609,27 +470,24 @@ def parse_inputs():
     """
     Parse the input arguments for actions tu run.
 
-    :return: args, Namespace containing the actions to run.
+    :return: Namespace containing the actions to run.
     """
     parser = argparse.ArgumentParser()
-
     parser.add_argument("-c", "--collect-data", action="store_true", help="Collect new data")
-
-    args = parser.parse_args()
-    return args
+    parser.add_argument("-d", "--create-dataset", action="store_true", help="Create a new dataset")
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-
+    # Parse inputs
     args = parse_inputs()
-    if args.collect_data:
-        create_data()
 
-    # Formatting the dataset
-    # data = formatDataset(data_dir="./data/",
-    #                      series_names=['abc', 'abc1', 'abc2', 'abc3', 'abc4', 'abc5'],
-    #                      res_out=(100, 100),
-    #                      outpath="./data/compilation.h5")
+    # Check args to collect data
+    if args.collect_data:
+        data.collect_data()
+
+    if args.create_dataset:
+        data.create_dataset()
 
     # Loading the data and training the model
     # data = loadHDF5("./data/compilation.h5")
