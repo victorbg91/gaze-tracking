@@ -3,7 +3,6 @@ import os
 
 import tensorflow as tf
 import numpy as np
-import h5py
 import cv2
 
 import data
@@ -11,16 +10,16 @@ import data
 # ---------------- #
 # LOADING DATA SET #
 # ---------------- #
-# Loading the HDF5 dataset
-def loadHDF5(inpath):
-    with h5py.File(inpath, 'r') as f:
-        dataLeftEye = f['dataLeftEye'][()]
-        dataRightEye = f['dataRightEye'][()]
-        dataLeftCoord = f['dataLeftCoord'][()]
-        dataRightCoord = f['dataRightCoord'][()]
-        dataLabels = f['dataLabels'][()]
-
-    return dataLeftEye, dataRightEye, dataLeftCoord, dataRightCoord, dataLabels
+# # Loading the HDF5 dataset
+# def loadHDF5(inpath):
+#     with h5py.File(inpath, 'r') as f:
+#         dataLeftEye = f['dataLeftEye'][()]
+#         dataRightEye = f['dataRightEye'][()]
+#         dataLeftCoord = f['dataLeftCoord'][()]
+#         dataRightCoord = f['dataRightCoord'][()]
+#         dataLabels = f['dataLabels'][()]
+#
+#     return dataLeftEye, dataRightEye, dataLeftCoord, dataRightCoord, dataLabels
 
 # -------------------- #
 # TRAIN NEURAL NETWORK #
@@ -475,6 +474,7 @@ def parse_inputs():
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--collect-data", action="store_true", help="Collect new data")
     parser.add_argument("-d", "--create-dataset", action="store_true", help="Create a new dataset")
+    parser.add_argument("-l", "--load-dataset", action="store_true", help="Load dataset")
     return parser.parse_args()
 
 
@@ -488,6 +488,11 @@ if __name__ == "__main__":
 
     if args.create_dataset:
         data.create_dataset()
+
+    if args.load_dataset:
+        dataset = data.load_dataset()
+        left_eye, right_eye, left_eye_coordinates, right_eye_coordinates, labels = dataset
+
 
     # Loading the data and training the model
     # data = loadHDF5("./data/compilation.h5")

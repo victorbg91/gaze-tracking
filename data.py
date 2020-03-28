@@ -1,3 +1,4 @@
+# Imports
 import datetime
 import glob
 import os
@@ -7,32 +8,29 @@ import numpy as np
 import h5py
 import cv2
 
+# Constants
+PATH_DATA = "./data"
+PATH_CONFIG = "./config"
+PATH_DATASET = os.path.join(PATH_DATA, "compilation.h5")
+PATH_HAAR_EYES = os.path.join(PATH_CONFIG, "haarcascade_eye.xml")
 
-def collect_data(num_expression=60, series_name=None, folder="./data/"):
-    """
-    Routine to collect new data. A
+SCREEN_WIDTH = 1600
+SCREEN_HEIGHT = 900
+TARGET_SIZE = 5
 
-    :param num_expression:
-    :param series_name:
-    :param folder:
-    :return:
-    """
+DATA_EYES_RESOLUTION = (100, 100)
+DATA_NUMBER_COLLECT = 60
 
-    # The resolution of the screen
-    scr_width = 1600
-    scr_height = 900
 
-    # The half-size of the target
-    target_size = 5
-
+def collect_data():
+    """Routine to collect new data."""
     # Set the series name
-    if series_name is None:
-        series_name = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    series_name = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
     # Checking for conflict with series name
-    list_conflict = glob.glob(folder + series_name + "*.png")
+    list_conflict = glob.glob(os.path.join(PATH_DATA, series_name + "*.png"))
     if len(list_conflict) > 0:
-        answer = input("Conflict detected with this series name.\nDo you want to delete " \
+        answer = input("Conflict detected with this series name.\nDo you want to delete "
                        + "{} items? [y/N]".format(len(list_conflict)))
 
         # Delete the conflicting files if 'y' or 'Y' is inputed
@@ -40,15 +38,12 @@ def collect_data(num_expression=60, series_name=None, folder="./data/"):
             # if True:
             for f in list_conflict:
                 os.remove(f)
-            os.remove(folder + series_name + "_labels.csv")
+            os.remove(os.path.join(PATH_DATA, series_name + "_labels.csv"))
 
         # Abort the program otherwise.
         else:
             print("Acquisition aborted")
             return -1
-
-    # Label container
-    expression = []
 
     # Opening video capture
     video_capture = cv2.VideoCapture(0)
@@ -56,32 +51,32 @@ def collect_data(num_expression=60, series_name=None, folder="./data/"):
         raise Exception("Could not open webcam")
 
     # Opening display window
-    # print(GetSystemMetrics(0))
     cv2.namedWindow("Frame", cv2.WND_PROP_FULLSCREEN)
     cv2.setWindowProperty("Frame", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
     # Display the gaze instructions and wait 1 second.
-    img = np.zeros((scr_height, scr_width), np.uint8)
+    img = np.zeros((SCREEN_HEIGHT, SCREEN_WIDTH), np.uint8)
     font = cv2.FONT_HERSHEY_DUPLEX
-    cv2.putText(img, 'TRACK THE TARGET', (50, 300), font, 4, (255, 255, 255), 2, cv2.LINE_AA)
+    cv2.putText(img, 'TRACK THE TARGET', (50, 300), font, 4, (255, 255, 255), 2)
     cv2.imshow('Frame', img)
     cv2.waitKey(1000)
 
     # Loop to capture frames
-    for ind in range(num_expression):
+    labels = []
+    for ind in range(DATA_NUMBER_COLLECT):
         # Set the x and y coordinates
         x_nor, y_nor = np.random.rand(), np.random.rand()
-        x_pix, y_pix = int(x_nor * scr_width), int(y_nor * scr_height)
+        x_pix, y_pix = int(x_nor * SCREEN_WIDTH), int(y_nor * SCREEN_HEIGHT)
 
         # Draw the target
-        img = np.zeros((scr_height, scr_width, 3), np.uint8)
+        img = np.zeros((SCREEN_HEIGHT, SCREEN_WIDTH, 3), np.uint8)
         cv2.rectangle(img,
-                      (x_pix - target_size, y_pix - target_size,),
-                      (x_pix + target_size, y_pix + target_size),
+                      (x_pix - TARGET_SIZE, y_pix - TARGET_SIZE,),
+                      (x_pix + TARGET_SIZE, y_pix + TARGET_SIZE),
                       (1, 255, 1),
                       2)
-
-        cv2.putText(img, str(ind + 1) + "/" + str(num_expression), (50, 850), font, 1, (255, 255, 255), 2, cv2.LINE_AA)
+        cv2.putText(img, str(ind + 1) + "/" + str(DATA_NUMBER_COLLECT), (50, 850),
+                    font, 1, (255, 255, 255), 2)
         cv2.imshow('Frame', img)
         cv2.waitKey(1000)
 
@@ -90,32 +85,25 @@ def collect_data(num_expression=60, series_name=None, folder="./data/"):
         img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         # Saving the image
-        try:
-            # Save image and label
-            expression.append([x_nor, y_nor])
-            nom = folder + series_name + "_" + str(ind).zfill(4) + ".png"
-            cv2.imwrite(nom, img_gray)
-        except:
-            print("Could not save the image.")
+        labels.append([x_nor, y_nor])
+        nom = os.path.join(PATH_DATA, series_name + "_" + str(ind).zfill(4) + ".png")
+        cv2.imwrite(nom, img_gray)
 
     # Close webcam and instruction window
     video_capture.release()
     cv2.destroyAllWindows()
 
     # Save the list of expressions
-    nom_fiche = folder + series_name + "_labels.csv"
-    np.savetxt(nom_fiche, expression, fmt='%f')
+    labels_filename = os.path.join(PATH_DATA, series_name + "_labels.csv")
+    np.savetxt(labels_filename, labels, fmt='%f')
 
 
-def create_dataset(data_dir="./data",
-                   series_names=None,
-                   res_out=(100, 100),
-                   outpath="./data/compilation.h5"):
+def create_dataset():
+    """Compile the data and output a dataset."""
     # Get the name of all the data series.
-    if series_names is None:
-        series_names = glob.glob(os.path.join(data_dir, "*.csv"))
+    series_names = glob.glob(os.path.join(PATH_DATA, "*.csv"))
 
-    # Loading the labels.
+    # Load the labels.
     print("\nLoading the data")
     labels = []
     for name in series_names:
@@ -124,7 +112,7 @@ def create_dataset(data_dir="./data",
         labels.append(label)
     labels = np.concatenate(labels)
 
-    # Loading the images
+    # Load the images
     file_list = [glob.glob(name[:-11] + "_*.png") for name in series_names]
     data = []
     for series in file_list:
@@ -137,8 +125,8 @@ def create_dataset(data_dir="./data",
 
         print("Loaded {} images for series {}".format(count_img, name))
 
-    # Loading the Haar cascade
-    eye_cascade = cv2.CascadeClassifier('./config/haarcascade_eye.xml')
+    # Load the Haar cascade
+    eye_cascade = cv2.CascadeClassifier(PATH_HAAR_EYES)
     if eye_cascade.empty():
         raise NameError("Couldn't find the Haar Cascade XML file.")
 
@@ -146,96 +134,130 @@ def create_dataset(data_dir="./data",
     data_sz = data[0].shape
     faulty_data = 0
 
-    dataLeftEye = []
-    dataRightEye = []
-    dataLeftCoord = []
-    dataRightCoord = []
-    dataLabels = []
+    # Initialize
+    data_left_eye = []
+    data_right_eye = []
+    data_left_eye_coordinates = []
+    data_right_eye_coordinates = []
+    data_labels = []
 
-    # Extracting the eye information
+    # Extract the eye information
     print("Extracting the eye information")
     for i, img in tqdm(enumerate(data)):
-        # Applying the Haar cascade
+        # Apply the Haar cascade
         eyes = eye_cascade.detectMultiScale(img)
 
-        # Making sure we detect exactly 2 eyes
+        # Check the data for detection errors
         try:
-            assert (eyes.shape[0] == 2)
-            # labels_valid.append(labels[i])
+            # Check if no eyes were detected
+            assert type(eyes) is not tuple
+
+            # Check if exactly two eyes were detected
+            assert eyes.shape[0] == 2
+
+        # Reject faulty data
         except AssertionError:
             faulty_data += 1
             continue
 
-        # Extracting the left and right eye coordinates
-        # Keep in mind that the image is naturally inverted: the left eye will be at the right of the picture
-        # They are ordered as [x, y, width, height]
-        # It is given in pixel values
+        # Extract the left and right eye coordinates
+        # Keep in mind that the image is naturally inverted in the picture:
+        # the left eye will be at the right of the picture
         if eyes[0, 0] < eyes[1, 0]:
-            lec = eyes[1, :]
-            rec = eyes[0, :]
+            left_eye_coordinates = eyes[1, :]
+            right_eye_coordinates = eyes[0, :]
         else:
-            lec = eyes[0, :]
-            rec = eyes[1, :]
+            left_eye_coordinates = eyes[0, :]
+            right_eye_coordinates = eyes[1, :]
 
-        # Extracting the eyes
-        le = img[lec[1]:lec[1] + lec[3], lec[0]:lec[0] + lec[2]]
-        re = img[rec[1]:rec[1] + rec[3], rec[0]:rec[0] + rec[2]]
+        # Extract the eye images
+        top, left = left_eye_coordinates[1], left_eye_coordinates[0]
+        bottom, right = top + left_eye_coordinates[3], left + left_eye_coordinates[2]
+        left_eye = img[top:bottom, left:right]
 
-        # Resizing the eyes
-        if res_out is not None and type(res_out) is tuple:
-            le = cv2.resize(le, res_out)
-            re = cv2.resize(re, res_out)
+        top, left = right_eye_coordinates[1], right_eye_coordinates[0]
+        bottom, right = top + right_eye_coordinates[3], left + right_eye_coordinates[2]
+        right_eye = img[top:bottom, left:right]
 
-        # Normalizing the image data
-        le = np.array(le) / 255.0
-        re = np.array(re) / 255.0
+        # Resize the eyes
+        if DATA_EYES_RESOLUTION is not None and type(DATA_EYES_RESOLUTION) is tuple:
+            left_eye = cv2.resize(left_eye, DATA_EYES_RESOLUTION)
+            right_eye = cv2.resize(right_eye, DATA_EYES_RESOLUTION)
+
+        # Normalize the image data
+        left_eye = np.array(left_eye) / 255.0
+        right_eye = np.array(right_eye) / 255.0
 
         # Normalizing the coordinates
-        w = float(data_sz[1])
-        h = float(data_sz[0])
-        lec = np.array(lec, dtype=float)
-        rec = np.array(rec, dtype=float)
-        lec[0] /= w;
-        lec[2] /= w;
-        rec[0] /= w;
-        rec[2] /= w
-        lec[1] /= h;
-        lec[3] /= h;
-        rec[1] /= h;
-        rec[3] /= h
+        width = float(data_sz[1])
+        height = float(data_sz[0])
+        left_eye_coordinates = np.array(left_eye_coordinates, dtype=float)
+        right_eye_coordinates = np.array(right_eye_coordinates, dtype=float)
+        left_eye_coordinates /= np.array([width, height, width, height])
+        right_eye_coordinates /= np.array([width, height, width, height])
 
-        # Changing our coordinates to the center of the eye
-        lec[0] += lec[2] / 2;
-        lec[1] += lec[3] / 2
-        rec[0] += rec[2] / 2;
-        rec[1] += rec[3] / 2
+        # Change the coordinates to the center of the eye
+        left_eye_coordinates[0] += (left_eye_coordinates[2]-left_eye_coordinates[0]) / 2
+        left_eye_coordinates[1] += (left_eye_coordinates[3]-left_eye_coordinates[1]) / 2
+        right_eye_coordinates[0] += (right_eye_coordinates[2]-right_eye_coordinates[0]) / 2
+        right_eye_coordinates[1] += (right_eye_coordinates[3]-right_eye_coordinates[1]) / 2
 
-        # Resizing to add the color channel for compatibility with tensorflow convolution layers
-        le = le.reshape(res_out[0], res_out[1], 1)
-        re = re.reshape(res_out[0], res_out[1], 1)
+        # Resize to add the color channel for tensorflow compatibility
+        left_eye = left_eye.reshape(DATA_EYES_RESOLUTION[0], DATA_EYES_RESOLUTION[1], 1)
+        right_eye = right_eye.reshape(DATA_EYES_RESOLUTION[0], DATA_EYES_RESOLUTION[1], 1)
 
         # Appending to our data containers
-        dataLeftEye.append(le)
-        dataRightEye.append(re)
-        dataLeftCoord.append(lec)
-        dataRightCoord.append(rec)
-        dataLabels.append(labels[i])
+        data_left_eye.append(left_eye)
+        data_right_eye.append(right_eye)
+        data_left_eye_coordinates.append(left_eye_coordinates)
+        data_right_eye_coordinates.append(right_eye_coordinates)
+        data_labels.append(labels[i])
 
-    # Printing the number of faulty images
+    # Print the number of faulty images
     print("There were {} faulty images".format(faulty_data))
 
-    # Converting to numpy arrays for HDF5 compatibility
-    dataLeftEye = np.array(dataLeftEye)
-    dataRightEye = np.array(dataRightEye)
-    dataLeftCoord = np.array(dataLeftCoord)
-    dataRightCoord = np.array(dataRightCoord)
-    dataLabels = np.array(dataLabels)
+    # Convert to numpy arrays for HDF5 compatibility
+    data_left_eye = np.array(data_left_eye)
+    data_right_eye = np.array(data_right_eye)
+    data_left_eye_coordinates = np.array(data_left_eye_coordinates)
+    data_right_eye_coordinates = np.array(data_right_eye_coordinates)
+    data_labels = np.array(data_labels)
 
-    # Saving data to HDF5 file
-    if outpath is not None:
-        with h5py.File(outpath, 'w') as f:
-            f.create_dataset("dataLeftEye", data=dataLeftEye)
-            f.create_dataset("dataRightEye", data=dataRightEye)
-            f.create_dataset("dataLeftCoord", data=dataLeftCoord)
-            f.create_dataset("dataRightCoord", data=dataRightCoord)
-            f.create_dataset("dataLabels", data=dataLabels)
+    # Save data to HDF5 file
+    with h5py.File(PATH_DATASET, 'w') as f:
+        f.create_dataset("data_left_eye", data=data_left_eye)
+        f.create_dataset("data_right_eye", data=data_right_eye)
+        f.create_dataset("data_left_eye_coordinates", data=data_left_eye_coordinates)
+        f.create_dataset("data_right_eye_coordinates", data=data_right_eye_coordinates)
+        f.create_dataset("data_labels", data=data_labels)
+
+
+def load_dataset():
+    """
+    Load dataset in a training-ready format.
+
+    Returns
+    -------
+    left_eye : np.ndarray
+        Array of shape (n, height, width, 1) containing the left eye images.
+    right_eye : numpy.ndarray
+        Array of shape (n, height, width, 1) containing the right eye images.
+    left_eye_coordinates : numpy.ndarray
+        Array of shape (n, 4) containing the coordinates (xc, yc, width, height)
+        of the left eye.
+    right_eye_coordinates : numpy.ndarray
+        Array of shape (n, 4) containing the coordinates (xc, yc, width, height)
+        of the right eye.
+    labels : numpy.ndarray
+        Array of shape (n, 2) containing the coordinates (x, y) of the position
+        of the dot on the screen.
+
+    """
+    with h5py.File(PATH_DATASET, 'r') as f:
+        left_eye = f['data_left_eye'][()]
+        right_eye = f['data_right_eye'][()]
+        left_eye_coordinates = f['data_left_eye_coordinates'][()]
+        right_eye_coordinates = f['data_right_eye_coordinates'][()]
+        labels = f['data_labels'][()]
+
+    return left_eye, right_eye, left_eye_coordinates, right_eye_coordinates, labels
