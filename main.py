@@ -1,10 +1,11 @@
+import datetime
 import argparse
 
 import tensorflow as tf
 import numpy as np
 import cv2
 
-import model
+import trainer
 import data
 
 
@@ -190,14 +191,7 @@ if __name__ == "__main__":
 
     if args.train_model:
         dataset = data.load_dataset()
-        model.train_network(dataset,
-                            checkpointfolder="./model/",
-                            outpath="./model/model.h5",
-                            logpath='./model/logfile.csv',
-                            tfboardpath=None,  # "./model/logboard/",
-                            perc_val=0.2,
-                            perc_test=0.2,
-                            )
+        trainer.train_model(dataset)
 
     # Loading the data and training the model
     # data = loadHDF5("./data/compilation.h5")
