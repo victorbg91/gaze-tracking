@@ -19,25 +19,25 @@ def _define_eye_branch():
     """Define the CNN branch for an eye image."""
     input_eye = tf.keras.layers.Input(MODEL_IMAGE_SIZE)
 
-    # eye = tf.keras.layers.Dropout(0.2, input_shape=eye_input_sz)(input_eye)
+    # eye = tf.keras.layers.Dropout(0.2, input_shape=MODEL_IMAGE_SIZE)(input_eye)
     eye = input_eye
 
     eye = tf.keras.layers.Conv2D(filters=16, kernel_size=(3, 3), activation='relu')(eye)
-    # eye = tf.keras.layers.Dropout(0.2)(eye)
+    eye = tf.keras.layers.Dropout(0.2)(eye)
     eye = tf.keras.layers.Conv2D(filters=16, kernel_size=(3, 3), activation='relu')(eye)
-    # eye = tf.keras.layers.Dropout(0.2)(eye)
+    eye = tf.keras.layers.Dropout(0.2)(eye)
     eye = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(eye)
 
     eye = tf.keras.layers.Conv2D(filters=32, kernel_size=(3, 3), activation='relu')(eye)
-    # eye = tf.keras.layers.Dropout(0.2)(eye)
+    eye = tf.keras.layers.Dropout(0.2)(eye)
     eye = tf.keras.layers.Conv2D(filters=32, kernel_size=(3, 3), activation='relu')(eye)
-    # eye = tf.keras.layers.Dropout(0.2)(eye)
+    eye = tf.keras.layers.Dropout(0.2)(eye)
     eye = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(eye)
 
     eye = tf.keras.layers.Conv2D(filters=64, kernel_size=(3, 3), activation='relu')(eye)
-    # eye = tf.keras.layers.Dropout(0.2)(eye)
+    eye = tf.keras.layers.Dropout(0.2)(eye)
     eye = tf.keras.layers.Conv2D(filters=64, kernel_size=(3, 3), activation='relu')(eye)
-    # eye = tf.keras.layers.Dropout(0.2)(eye)
+    eye = tf.keras.layers.Dropout(0.2)(eye)
     eye = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(eye)
 
     # eye = tf.keras.layers.Conv2D(filters=128, kernel_size=(3, 3), activation='relu')(eye)

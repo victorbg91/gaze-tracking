@@ -133,6 +133,8 @@ def create_dataset():
     # Loop information
     data_sz = data[0].shape
     faulty_data = 0
+    correct_data = 0
+    faulty_images = []
 
     # Initialize
     data_left_eye = []
@@ -155,9 +157,27 @@ def create_dataset():
             # Check if exactly two eyes were detected
             assert eyes.shape[0] == 2
 
+            # Assume the data is correct
+            correct_data += 1
+
         # Reject faulty data
         except AssertionError:
             faulty_data += 1
+
+            if type(eyes) is tuple:
+                faulty_images.append(img)
+            else:
+                for eye in eyes:
+                    img = img.reshape(img.shape + (1,))
+                    img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+                    pt1 = tuple([eye[0], eye[1]])
+                    pt2 = np.add(pt1, (eye[2], eye[3]))
+                    pt2 = tuple(pt2)
+                    color = tuple([255, 0, 0])
+                    img = cv2.rectangle(img, pt1, pt2, color, 3)
+
+                faulty_images.append(img)
+
             continue
 
         # Extract the left and right eye coordinates
@@ -214,7 +234,11 @@ def create_dataset():
         data_labels.append(labels[i])
 
     # Print the number of faulty images
-    print("There were {} faulty images".format(faulty_data))
+    print("There were {} faulty images and {} correct images".format(faulty_data, correct_data))
+    for image in faulty_images:
+        cv2.imshow("Review faulty images", image)
+        if cv2.waitKey(0) == 27:  # Escape key
+            break
 
     # Convert to numpy arrays for HDF5 compatibility
     data_left_eye = np.array(data_left_eye)
