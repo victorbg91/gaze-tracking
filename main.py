@@ -171,6 +171,7 @@ def parse_inputs():
     parser.add_argument("-d", "--create-dataset", action="store_true", help="Create a new dataset")
     parser.add_argument("-l", "--load-dataset", action="store_true", help="Load dataset")
     parser.add_argument("-t", "--train-model", action="store_true", help="Train the model")
+    parser.add_argument("-r", "--review-dataset", action="store_true", help="Review the dataset")
     return parser.parse_args()
 
 
@@ -188,6 +189,9 @@ if __name__ == "__main__":
     if args.load_dataset:
         dataset = data.load_dataset()
         left_eye, right_eye, left_eye_coordinates, right_eye_coordinates, labels = dataset
+
+    if args.review_dataset:
+        data.review_dataset()
 
     if args.train_model:
         dataset = data.load_dataset()

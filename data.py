@@ -217,10 +217,10 @@ def create_dataset():
         right_eye_coordinates /= np.array([width, height, width, height])
 
         # Change the coordinates to the center of the eye
-        left_eye_coordinates[0] += (left_eye_coordinates[2]-left_eye_coordinates[0]) / 2
-        left_eye_coordinates[1] += (left_eye_coordinates[3]-left_eye_coordinates[1]) / 2
-        right_eye_coordinates[0] += (right_eye_coordinates[2]-right_eye_coordinates[0]) / 2
-        right_eye_coordinates[1] += (right_eye_coordinates[3]-right_eye_coordinates[1]) / 2
+        left_eye_coordinates[0] += left_eye_coordinates[2]//2
+        left_eye_coordinates[1] += left_eye_coordinates[3]//2
+        right_eye_coordinates[0] += right_eye_coordinates[2]//2
+        right_eye_coordinates[1] += right_eye_coordinates[3]//2
 
         # Resize to add the color channel for tensorflow compatibility
         left_eye = left_eye.reshape(DATA_EYES_RESOLUTION[0], DATA_EYES_RESOLUTION[1], 1)
@@ -285,3 +285,33 @@ def load_dataset():
         labels = f['data_labels'][()]
 
     return left_eye, right_eye, left_eye_coordinates, right_eye_coordinates, labels
+
+
+def review_dataset():
+    # Load dataset
+    dataset = load_dataset()
+
+    # Draw a frame for each dataset entry
+    for le, re, lec, rec, lab in zip(*dataset):
+        # Initialize
+        height, width = 480, 640
+        image = np.zeros((height, width), dtype=np.uint8)
+
+        # Draw eyes
+        for img, coords in [(le, lec), (re, rec)]:
+            w, h = int(coords[2]*width), int(coords[3]*height)
+            left, top = int(coords[0]*width - w//2), int(coords[1]*height - h//2)
+
+            img = np.uint8(img*255)
+            img = cv2.resize(img, dsize=(w, h))
+
+            image[top: top+h, left: left+w] = img
+
+        # Draw label
+        pt = tuple([int(width - lab[0]*width), int(lab[1]*height)])
+        cv2.drawMarker(image, pt, 255)
+
+        # Show data
+        cv2.imshow("Review dataset", image)
+        if cv2.waitKey(0) in [27, ord('q')]:
+            break
