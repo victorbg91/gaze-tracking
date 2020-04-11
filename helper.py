@@ -29,9 +29,20 @@ class ImageProcessor:
 
     DATA_EYES_RESOLUTION = (100, 100)
 
-    def __init__(self):
+    def __init__(self, erase_index=False):
         # Load cascade classifier
         self.cascade = cv2.CascadeClassifier(self.PATH_HAAR_EYES)
+
+        # Erase index if applicable
+        if erase_index:
+            try:
+                os.remove(self.PATH_INDEX)
+            except OSError:
+                pass
+            try:
+                os.remove(self.PATH_REJECT)
+            except OSError:
+                pass
 
         # Create files if they don't already exist
         if not os.path.exists(self.PATH_INDEX):
@@ -41,7 +52,7 @@ class ImageProcessor:
             with open(self.PATH_REJECT, "a") as _:
                 pass
 
-    def generate_filelist(self):
+    def generate_filelist(self, verbosity=0):
         """Generate a list of all data with their labels"""
         # Get the name of all the data series
         series_names = glob.glob(os.path.join(self.PATH_DATA, "*_labels.csv"))
@@ -54,7 +65,8 @@ class ImageProcessor:
         series_labels = []
         for name in series_names:
             label = np.genfromtxt(name, dtype=float)
-            print("Loaded {} labels for series {}".format(len(label), name))
+            if verbosity > 0:
+                print("Loaded {} labels for series {}".format(len(label), name))
             series_labels.append(label)
 
         # Assert that we have equal paths and labels for each series
@@ -102,96 +114,18 @@ class ImageProcessor:
             width, height of the eyes detected in the image. Units in pixels.
 
         """
+        # Detect the eyes and ensure that 2 eyes are detected
         eyes = self.cascade.detectMultiScale(image)
-        eyes = eyes if len(eyes) == 2 else None
+        if type(eyes) is tuple or len(eyes) != 2:
+            return None
+
+        # Identify the left eye
+        if eyes[0, 0] < eyes[1, 0]:
+            eyes = eyes[::-1, :]
+
         return eyes
 
-    def _postprocess(self, image, eyes):
-        """
-        Format the data for compatibility with tensorflow model.
-
-        Parameters
-        ----------
-        image : numpy.ndarray
-            The preprocessed image.
-        eyes : list
-            List of eye coordinates with x, y coordinates of the top-left corner and
-            width, height of the eyes detected in the image. Units in pixels.
-
-        Returns
-        -------
-        left_eye : numpy.ndarray
-            Image of the left eye, resized for compatibility with the model. Colors
-            normalized between 0 and 1.
-        right_eye : numpy.ndarray
-            Image of the right eye, resized for compatibility with the model. Colors
-            normalized between 0 and 1.
-        left_eye_coordinates : numpy.ndarray
-            The (x, y, w, h) coordinates of the left eye. The x, y coordinates are for the
-            center of the eye. Units normalized with the width and height of the image.
-        right_eye_coordinates : numpy.ndarray
-            The (x, y, w, h) coordinates of the left eye. The x, y coordinates are for the
-            center of the eye. Units normalized with the width and height of the image.
-
-        """
-        # Size of the images
-        data_sz = image.shape
-
-        # Extract the left and right eye coordinates
-        # Keep in mind that the image is naturally inverted in the picture:
-        # the left eye will be at the right of the picture
-        if eyes[0, 0] < eyes[1, 0]:
-            left_eye_coordinates = eyes[1, :]
-            right_eye_coordinates = eyes[0, :]
-        else:
-            left_eye_coordinates = eyes[0, :]
-            right_eye_coordinates = eyes[1, :]
-
-        # Extract the eye images
-        top, left = left_eye_coordinates[1], left_eye_coordinates[0]
-        bottom, right = top + left_eye_coordinates[3], left + left_eye_coordinates[2]
-        left_eye = img[top:bottom, left:right]
-
-        top, left = right_eye_coordinates[1], right_eye_coordinates[0]
-        bottom, right = top + right_eye_coordinates[3], left + right_eye_coordinates[2]
-        right_eye = img[top:bottom, left:right]
-
-        # Resize the eyes
-        left_eye = cv2.resize(left_eye, self.DATA_EYES_RESOLUTION)
-        right_eye = cv2.resize(right_eye, self.DATA_EYES_RESOLUTION)
-
-        # Normalize the image data
-        left_eye = np.array(left_eye) / 255.0
-        right_eye = np.array(right_eye) / 255.0
-
-        # Normalize the coordinates
-        width = float(data_sz[1])
-        height = float(data_sz[0])
-        left_eye_coordinates = np.array(left_eye_coordinates, dtype=float)
-        right_eye_coordinates = np.array(right_eye_coordinates, dtype=float)
-        left_eye_coordinates /= np.array([width, height, width, height])
-        right_eye_coordinates /= np.array([width, height, width, height])
-
-        # Change the coordinates to the center of the eye
-        left_eye_coordinates[0] += left_eye_coordinates[2] // 2
-        left_eye_coordinates[1] += left_eye_coordinates[3] // 2
-        right_eye_coordinates[0] += right_eye_coordinates[2] // 2
-        right_eye_coordinates[1] += right_eye_coordinates[3] // 2
-
-        # Resize to add the color channel for tensorflow compatibility
-        left_eye = left_eye.reshape(DATA_EYES_RESOLUTION[0], DATA_EYES_RESOLUTION[1], 1)
-        right_eye = right_eye.reshape(DATA_EYES_RESOLUTION[0], DATA_EYES_RESOLUTION[1], 1)
-
-        return left_eye, right_eye, left_eye_coordinates, right_eye_coordinates
-
-    def process_image(self, image):
-        """Routine to group all eye detection steps."""
-        image = self._preprocess(image)
-        eyes = self._detect_eyes()
-        data = self._postprocess(image, eyes)
-        return data
-
-    def index_files(self):
+    def index_dataset(self):
         """Index all valid training data and index it for use with dataset generator."""
         # Generate the set of already-indexed files
         indexed = []
@@ -200,12 +134,15 @@ class ImageProcessor:
             for line in index:
                 path = line.split(",")[0]
                 indexed.append(path)
+        len_index = len(indexed)
 
         with open(self.PATH_REJECT) as reject:
             for line in reject:
-                path = line.split(",")[0]
-                indexed.append(path)
+                indexed.append(line.rstrip("\n"))
+        len_reject = len(indexed) - len_index
 
+        print("Currently {} indexed and {} rejected images.".format(
+            len_index, len_reject))
         indexed = set(indexed)
 
         # Generate the data paths
@@ -216,6 +153,7 @@ class ImageProcessor:
         reject = open(self.PATH_REJECT, "a")
 
         # Append non-indexed files:
+        print("Indexing the files...")
         for path, label in tqdm.tqdm(data):
             if path in indexed:
                 continue
@@ -225,11 +163,11 @@ class ImageProcessor:
             img = self._preprocess(img)
             res = self._detect_eyes(img)
 
-            # Append accordingly
-            line = path + "," + str(label[0]) + "," + str(label[1]) + "\n"
+            # Write to corresponding file
             if res is None:
-                reject.write(line)
+                reject.write(path + "\n")
             else:
+                line = ",".join([path, str(res[0, :]), str(res[1, :]), str(label)]) + "\n"
                 index.write(line)
 
         # Close files
@@ -238,13 +176,23 @@ class ImageProcessor:
 
     def load_index(self):
         """Load all files in the index."""
-        data = []
+        paths = []
+        lefts = []
+        rights = []
+        labels = []
         with open(self.PATH_INDEX) as index:
             for line in index:
                 line = line.split(",")
-                path = line[0]
-                label = np.array(line[1:], dtype=float)
-                data.append(path, label)
 
-        return data
+                path = line[0]
+                left = [int(num) for num in line[1][1:-1].split(" ") if num]
+                right = [int(num) for num in line[2][1:-1].split(" ") if num]
+                label = [float(num) for num in line[3][1:-2].split(" ") if num]
+
+                paths.append(path)
+                lefts.append(left)
+                rights.append(right)
+                labels.append(label)
+
+        return paths, lefts, rights, labels
 

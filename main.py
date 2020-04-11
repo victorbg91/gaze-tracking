@@ -7,6 +7,7 @@ import cv2
 
 import trainer
 import data
+import helper
 
 
 # ------------------ #
@@ -168,8 +169,7 @@ def parse_inputs():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--collect-data", action="store_true", help="Collect new data")
-    parser.add_argument("-d", "--create-dataset", action="store_true", help="Create a new dataset")
-    parser.add_argument("-l", "--load-dataset", action="store_true", help="Load dataset")
+    parser.add_argument("-i", "--index-dataset", action="store_true", help="Create a new dataset")
     parser.add_argument("-t", "--train-model", action="store_true", help="Train the model")
     parser.add_argument("-r", "--review-dataset", action="store_true", help="Review the dataset")
     return parser.parse_args()
@@ -179,45 +179,17 @@ if __name__ == "__main__":
     # Parse inputs
     args = parse_inputs()
 
+    # Initialize
+    image_proc = helper.ImageProcessor(erase_index=False)
+    model = trainer.Model()
+
     # Check args for actions
     if args.collect_data:
         data.collect_data()
-
-    if args.create_dataset:
-        data.create_dataset()
-
-    if args.load_dataset:
-        dataset = data.load_dataset()
-        left_eye, right_eye, left_eye_coordinates, right_eye_coordinates, labels = dataset
 
     if args.review_dataset:
         data.review_dataset()
 
     if args.train_model:
-        dataset = data.load_dataset()
-        trainer.train_model(dataset)
-
-    # Loading the data and training the model
-    # data = loadHDF5("./data/compilation.h5")
-    # train_network(data,
-    #               checkpointfolder="./model/",
-    #               outpath="./model/model.h5",
-    #               logpath='./model/logfile.csv',
-    #               tfboardpath=None,#"./model/logboard/",
-    #               perc_val=0.2,
-    #               perc_test=0.2,
-    #               )
-
-    # Loading a checkpoint and saving the corresponding model.
-    # model = model_conv_eyes((100, 100, 1))
-    # save_complete_model(model=model,
-    #                     inpath="./model/checkpoint.ckpt",
-    #                     outpath="./model/savedmodels/1/")
-
-    # img_gen = acquire_image()
-    # eye_gen = extract_eye(img_gen, res_out=(100, 100))
-    # webcam_gaze(modelpath="./model/savedmodels/1/", eye_gen=eye_gen)
-
-
-    # Runnning the webcam application
-    # webcam_smile(inpath="./model/model.h5", res_img=(64, 64))
+        image_proc.index_dataset()
+        model.train_model()
