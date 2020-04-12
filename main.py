@@ -185,8 +185,10 @@ if __name__ == "__main__":
     # Check args for actions
     if args.collect_data:
         util.collect_data()
+        util.index_dataset()
 
     if args.review_dataset:
+        util.index_dataset()
         util.review_dataset()
 
     if args.train_model:

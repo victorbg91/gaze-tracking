@@ -61,13 +61,13 @@ class ImageProcessor:
     # -------- #
     # RAW DATA #
     # -------- #
-    def collect_data():
+    def collect_data(self):
         """Routine to collect new data."""
         # Set the series name
         series_name = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
         # Checking for conflict with series name
-        list_conflict = glob.glob(os.path.join(PATH_DATA, series_name + "*.png"))
+        list_conflict = glob.glob(os.path.join(self.PATH_DATA, series_name + "*.png"))
         if len(list_conflict) > 0:
             answer = input("Conflict detected with this series name.\nDo you want to delete "
                            + "{} items? [y/N]".format(len(list_conflict)))
@@ -77,7 +77,7 @@ class ImageProcessor:
                 # if True:
                 for f in list_conflict:
                     os.remove(f)
-                os.remove(os.path.join(PATH_DATA, series_name + "_labels.csv"))
+                os.remove(os.path.join(self.PATH_DATA, series_name + "_labels.csv"))
 
             # Abort the program otherwise.
             else:
@@ -94,7 +94,7 @@ class ImageProcessor:
         cv2.setWindowProperty("Frame", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
         # Display the gaze instructions and wait 1 second.
-        img = np.zeros((SCREEN_HEIGHT, SCREEN_WIDTH), np.uint8)
+        img = np.zeros((self.SCREEN_HEIGHT, self.SCREEN_WIDTH), np.uint8)
         font = cv2.FONT_HERSHEY_DUPLEX
         cv2.putText(img, 'TRACK THE TARGET', (50, 300), font, 4, (255, 255, 255), 2)
         cv2.imshow('Frame', img)
@@ -102,19 +102,19 @@ class ImageProcessor:
 
         # Loop to capture frames
         labels = []
-        for ind in range(DATA_NUMBER_COLLECT):
+        for ind in range(self.DATA_NUMBER_COLLECT):
             # Set the x and y coordinates
             x_nor, y_nor = np.random.rand(), np.random.rand()
-            x_pix, y_pix = int(x_nor * SCREEN_WIDTH), int(y_nor * SCREEN_HEIGHT)
+            x_pix, y_pix = int(x_nor * self.SCREEN_WIDTH), int(y_nor * self.SCREEN_HEIGHT)
 
             # Draw the target
-            img = np.zeros((SCREEN_HEIGHT, SCREEN_WIDTH, 3), np.uint8)
+            img = np.zeros((self.SCREEN_HEIGHT, self.SCREEN_WIDTH, 3), np.uint8)
             cv2.rectangle(img,
-                          (x_pix - TARGET_SIZE, y_pix - TARGET_SIZE,),
-                          (x_pix + TARGET_SIZE, y_pix + TARGET_SIZE),
+                          (x_pix - self.TARGET_SIZE, y_pix - self.TARGET_SIZE,),
+                          (x_pix + self.TARGET_SIZE, y_pix + self.TARGET_SIZE),
                           (1, 255, 1),
                           2)
-            cv2.putText(img, str(ind + 1) + "/" + str(DATA_NUMBER_COLLECT), (50, 850),
+            cv2.putText(img, str(ind + 1) + "/" + str(self.DATA_NUMBER_COLLECT), (50, 850),
                         font, 1, (255, 255, 255), 2)
             cv2.imshow('Frame', img)
             cv2.waitKey(1000)
@@ -125,7 +125,7 @@ class ImageProcessor:
 
             # Saving the image
             labels.append([x_nor, y_nor])
-            nom = os.path.join(PATH_DATA, series_name + "_" + str(ind).zfill(4) + ".png")
+            nom = os.path.join(self.PATH_DATA, series_name + "_" + str(ind).zfill(4) + ".png")
             cv2.imwrite(nom, img_gray)
 
         # Close webcam and instruction window
@@ -133,7 +133,7 @@ class ImageProcessor:
         cv2.destroyAllWindows()
 
         # Save the list of expressions
-        labels_filename = os.path.join(PATH_DATA, series_name + "_labels.csv")
+        labels_filename = os.path.join(self.PATH_DATA, series_name + "_labels.csv")
         np.savetxt(labels_filename, labels, fmt='%f')
 
     def _preprocess(self, image):
@@ -184,7 +184,7 @@ class ImageProcessor:
     # -------- #
     # INDEXING #
     # -------- #
-    def generate_filelist(self, verbosity=0):
+    def _generate_filelist(self, verbosity=0):
         """Generate a list of all data with their labels"""
         # Get the name of all the data series
         series_names = glob.glob(os.path.join(self.PATH_DATA, "*_labels.csv"))
@@ -193,7 +193,7 @@ class ImageProcessor:
         series_paths = [glob.glob(name[:-11] + "_*.png") for name in series_names]
 
         # Load the labels
-        print("\nLoading the labels")
+        print("Parsing the data folder...")
         series_labels = []
         for name in series_names:
             label = np.genfromtxt(name, dtype=float)
@@ -227,18 +227,17 @@ class ImageProcessor:
                 indexed.append(line.rstrip("\n"))
         len_reject = len(indexed) - len_index
 
-        print("Currently {} indexed and {} rejected images.".format(
-            len_index, len_reject))
         indexed = set(indexed)
 
         # Generate the data paths
-        data = self.generate_filelist()
+        data = self._generate_filelist()
 
         # Open index and reject for appending
         index = open(self.PATH_INDEX, "a")
         reject = open(self.PATH_REJECT, "a")
 
         # Append non-indexed files:
+        print("Before indexing: ", len_index, " indexed and ", len_reject, " rejected images.")
         print("Indexing the files...")
         for path, label in tqdm(data):
             if path in indexed:
@@ -252,15 +251,19 @@ class ImageProcessor:
             # Write to corresponding file
             if res is None:
                 reject.write(path + "\n")
+                len_reject += 1
             else:
                 line = ",".join([path, str(res[0, :]), str(res[1, :]), str(label)]) + "\n"
                 index.write(line)
+                len_index += 1
+
+        print("After indexing: ", len_index, " indexed and ", len_reject, " rejected images.")
 
         # Close files
         index.close()
         reject.close()
 
-    def load_index(self):
+    def _load_index(self):
         """Load all files in the index."""
         paths = []
         lefts = []
@@ -341,7 +344,7 @@ class ImageProcessor:
 
         """
         # Load data
-        data = self.load_index()
+        data = self._load_index()
         num_data = len(data[0])
 
         # Initialize dataset
