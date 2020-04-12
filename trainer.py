@@ -4,7 +4,7 @@ import datetime
 
 import tensorflow as tf
 
-import helper
+import data_util
 
 
 class Model:
@@ -19,11 +19,11 @@ class Model:
     MODEL_PERCENT_TEST = 0.2
     MODEL_IMAGE_SIZE = (64, 64)
 
-    TRAINING_EPOCHS = 200
+    TRAINING_EPOCHS = 1000
     TRAINING_BATCH_SIZE = 32
 
     def __init__(self):
-        self.image_proc = helper.ImageProcessor()
+        self.image_proc = data_util.ImageProcessor()
 
     # ----- #
     # MODEL #
@@ -36,21 +36,21 @@ class Model:
         eye = input_eye
 
         eye = tf.keras.layers.Conv2D(filters=16, kernel_size=(3, 3), activation='relu')(eye)
-        eye = tf.keras.layers.Dropout(0.2)(eye)
+        # eye = tf.keras.layers.Dropout(0.2)(eye)
         eye = tf.keras.layers.Conv2D(filters=16, kernel_size=(3, 3), activation='relu')(eye)
-        eye = tf.keras.layers.Dropout(0.2)(eye)
+        # eye = tf.keras.layers.Dropout(0.2)(eye)
         eye = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(eye)
 
         eye = tf.keras.layers.Conv2D(filters=32, kernel_size=(3, 3), activation='relu')(eye)
-        eye = tf.keras.layers.Dropout(0.2)(eye)
+        # eye = tf.keras.layers.Dropout(0.2)(eye)
         eye = tf.keras.layers.Conv2D(filters=32, kernel_size=(3, 3), activation='relu')(eye)
-        eye = tf.keras.layers.Dropout(0.2)(eye)
+        # eye = tf.keras.layers.Dropout(0.2)(eye)
         eye = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(eye)
 
         eye = tf.keras.layers.Conv2D(filters=64, kernel_size=(3, 3), activation='relu')(eye)
-        eye = tf.keras.layers.Dropout(0.2)(eye)
+        # eye = tf.keras.layers.Dropout(0.2)(eye)
         eye = tf.keras.layers.Conv2D(filters=64, kernel_size=(3, 3), activation='relu')(eye)
-        eye = tf.keras.layers.Dropout(0.2)(eye)
+        # eye = tf.keras.layers.Dropout(0.2)(eye)
         eye = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(eye)
 
         # eye = tf.keras.layers.Conv2D(filters=128, kernel_size=(3, 3), activation='relu')(eye)
@@ -183,8 +183,9 @@ class Model:
         num_data = len(data[0])
 
         # Initialize dataset
+        # tf.random.set_seed(1)
         dataset = tf.data.Dataset.from_tensor_slices(data)
-        dataset = dataset.shuffle(num_data)
+        # dataset = dataset.shuffle(num_data, reshuffle_each_iteration=False)
         dataset = dataset.map(self._parse_function, num_parallel_calls=2)
 
         # Split size

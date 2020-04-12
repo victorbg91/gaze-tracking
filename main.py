@@ -6,8 +6,7 @@ import numpy as np
 import cv2
 
 import trainer
-import data
-import helper
+import data_util
 
 
 # ------------------ #
@@ -180,16 +179,16 @@ if __name__ == "__main__":
     args = parse_inputs()
 
     # Initialize
-    image_proc = helper.ImageProcessor(erase_index=False)
+    util = data_util.ImageProcessor(erase_index=False)
     model = trainer.Model()
 
     # Check args for actions
     if args.collect_data:
-        data.collect_data()
+        util.collect_data()
 
     if args.review_dataset:
-        data.review_dataset()
+        util.review_dataset()
 
     if args.train_model:
-        image_proc.index_dataset()
+        util.index_dataset()
         model.train_model()
