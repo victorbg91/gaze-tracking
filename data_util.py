@@ -3,9 +3,11 @@ import datetime
 import glob
 import os
 
+import tensorflow as tf
 from tqdm import tqdm
 import numpy as np
 import cv2
+
 
 class ImageProcessor:
 
@@ -26,7 +28,7 @@ class ImageProcessor:
     PATH_INDEX = os.path.join(PATH_DATA, "index.csv")
     PATH_REJECT = os.path.join(PATH_DATA, "reject.csv")
 
-    DATA_EYES_RESOLUTION = (100, 100)
+    MODEL_IMAGE_SIZE = (100, 100)
     DATA_NUMBER_COLLECT = 60
 
     SCREEN_WIDTH = 1600
@@ -56,6 +58,9 @@ class ImageProcessor:
             with open(self.PATH_REJECT, "a") as _:
                 pass
 
+    # -------- #
+    # RAW DATA #
+    # -------- #
     def collect_data():
         """Routine to collect new data."""
         # Set the series name
@@ -131,63 +136,6 @@ class ImageProcessor:
         labels_filename = os.path.join(PATH_DATA, series_name + "_labels.csv")
         np.savetxt(labels_filename, labels, fmt='%f')
 
-    # TODO modify dataset review
-    def review_dataset():
-        # Load dataset
-        dataset = load_dataset()
-
-        # Draw a frame for each dataset entry
-        for le, re, lec, rec, lab in zip(*dataset):
-            # Initialize
-            height, width = 480, 640
-            image = np.zeros((height, width), dtype=np.uint8)
-
-            # Draw eyes
-            for img, coords in [(le, lec), (re, rec)]:
-                w, h = int(coords[2]*width), int(coords[3]*height)
-                left, top = int(coords[0]*width - w//2), int(coords[1]*height - h//2)
-
-                img = np.uint8(img*255)
-                img = cv2.resize(img, dsize=(w, h))
-
-                image[top: top+h, left: left+w] = img
-
-            # Draw label
-            pt = tuple([int(width - lab[0]*width), int(lab[1]*height)])
-            cv2.drawMarker(image, pt, 255)
-
-            # Show data
-            cv2.imshow("Review dataset", image)
-            if cv2.waitKey(0) in [27, ord('q')]:
-                break
-
-    def generate_filelist(self, verbosity=0):
-        """Generate a list of all data with their labels"""
-        # Get the name of all the data series
-        series_names = glob.glob(os.path.join(self.PATH_DATA, "*_labels.csv"))
-
-        # Load the paths
-        series_paths = [glob.glob(name[:-11] + "_*.png") for name in series_names]
-
-        # Load the labels
-        print("\nLoading the labels")
-        series_labels = []
-        for name in series_names:
-            label = np.genfromtxt(name, dtype=float)
-            if verbosity > 0:
-                print("Loaded {} labels for series {}".format(len(label), name))
-            series_labels.append(label)
-
-        # Assert that we have equal paths and labels for each series
-        is_equal = all([len(p) == len(l) for p, l in zip(series_paths, series_labels)])
-        is_equal = is_equal and len(series_names) == len(series_paths) == len(series_labels)
-        assert is_equal, "The data is misaligned."
-
-        # Assemble the paths and labels
-        data = [(p, l) for paths, labels in zip(series_paths, series_labels)
-                for p, l in zip(paths, labels)]
-        return data
-
     def _preprocess(self, image):
         """
         Preprocess an image for eye detection.
@@ -232,6 +180,36 @@ class ImageProcessor:
             eyes = eyes[::-1, :]
 
         return eyes
+
+    # -------- #
+    # INDEXING #
+    # -------- #
+    def generate_filelist(self, verbosity=0):
+        """Generate a list of all data with their labels"""
+        # Get the name of all the data series
+        series_names = glob.glob(os.path.join(self.PATH_DATA, "*_labels.csv"))
+
+        # Load the paths
+        series_paths = [glob.glob(name[:-11] + "_*.png") for name in series_names]
+
+        # Load the labels
+        print("\nLoading the labels")
+        series_labels = []
+        for name in series_names:
+            label = np.genfromtxt(name, dtype=float)
+            if verbosity > 0:
+                print("Loaded {} labels for series {}".format(len(label), name))
+            series_labels.append(label)
+
+        # Assert that we have equal paths and labels for each series
+        is_equal = all([len(p) == len(l) for p, l in zip(series_paths, series_labels)])
+        is_equal = is_equal and len(series_names) == len(series_paths) == len(series_labels)
+        assert is_equal, "The data is misaligned."
+
+        # Assemble the paths and labels
+        data = [(p, l) for paths, labels in zip(series_paths, series_labels)
+                for p, l in zip(paths, labels)]
+        return data
 
     def index_dataset(self):
         """Index all valid training data and index it for use with dataset generator."""
@@ -303,5 +281,121 @@ class ImageProcessor:
                 labels.append(label)
 
         return paths, lefts, rights, labels
+
+    # ------- #
+    # DATASET #
+    # ------- #
+    def _parse_eye(self, image, coords):
+        # Get the coordinates
+        left, top, width, height = coords[0], coords[1], coords[2], coords[3]
+        img_height, img_width = tf.shape(image)[0], tf.shape(image)[1]
+
+        # Get the eye image
+        img = tf.image.crop_to_bounding_box(image, top, left, height, width)
+        img = tf.image.resize(img, self.MODEL_IMAGE_SIZE)
+        img = tf.reshape(img, self.MODEL_IMAGE_SIZE + (1,))
+
+        # Normalize the coordinates
+        x = (left + width//2) / img_width
+        y = (top + height//2) / img_height
+        w = width / img_width
+        h = height / img_height
+        coord_out = tf.convert_to_tensor([x, y, w, h], dtype=float)
+
+        return img, coord_out
+
+    def _parse_function(self, path, left_eye_coord, right_eye_coord, label):
+        # Load the image
+        img = tf.io.read_file(path)
+        img = tf.image.decode_png(img)
+        img = tf.image.convert_image_dtype(img, tf.float32)
+
+        # Get the eye images and normalized coordinates
+        left_img, left_coord = self._parse_eye(img, left_eye_coord)
+        right_img, right_coord = self._parse_eye(img, right_eye_coord)
+
+        data = {"input_1": left_img, "input_2": right_img,
+                "input_3": left_coord, "input_4": right_coord}
+        return data, label
+
+    def initialize_dataset(self, percent_valid, percent_test, batch):
+        """
+        Initialize a tensorflow dataset pipeline.
+
+        Sources
+        -------
+        For data pipelines
+        https://cs230.stanford.edu/blog/datapipeline/
+
+        # To use python functions
+        https://stackoverflow.com/questions/55606909/how-to-use-tensorflow-dataset-with-opencv-preprocessing
+
+        # For buffer size when shuffling the dataset:
+        https://stackoverflow.com/questions/46444018/meaning-of-buffer-size-in-dataset-map-dataset-prefetch-and-dataset-shuffle/48096625#48096625
+
+        # To split dataset
+        https://stackoverflow.com/questions/51125266/how-do-i-split-tensorflow-datasets/51126863
+
+        # To use TFRECORDS
+        https://medium.com/@moritzkrger/speeding-up-keras-with-tfrecord-datasets-5464f9836c36
+
+        """
+        # Load data
+        data = self.load_index()
+        num_data = len(data[0])
+
+        # Initialize dataset
+        # TODO add caching
+        dataset = tf.data.Dataset.from_tensor_slices(data)
+        dataset = dataset.shuffle(num_data, reshuffle_each_iteration=False)
+        dataset = dataset.map(self._parse_function, num_parallel_calls=2)
+
+        # Split size
+        validation_size = int(percent_valid * num_data)
+        test_size = int(percent_test * num_data)
+        train_size = num_data - validation_size - test_size
+
+        # Split dataset
+        data_train = dataset.take(train_size)
+        data_valid = dataset.skip(train_size).take(validation_size)
+        data_test = dataset.skip(train_size + validation_size)
+
+        # Batch
+        data_train = data_train.batch(batch).prefetch(1)
+        data_valid = data_valid.batch(batch).prefetch(1)
+        data_test = data_test.batch(batch).prefetch(1)
+
+        return data_train, data_valid, data_test
+
+    # TODO modify dataset review
+    def review_dataset():
+        # Load dataset
+        dataset = load_dataset()
+
+        # Draw a frame for each dataset entry
+        for le, re, lec, rec, lab in zip(*dataset):
+            # Initialize
+            height, width = 480, 640
+            image = np.zeros((height, width), dtype=np.uint8)
+
+            # Draw eyes
+            for img, coords in [(le, lec), (re, rec)]:
+                w, h = int(coords[2]*width), int(coords[3]*height)
+                left, top = int(coords[0]*width - w//2), int(coords[1]*height - h//2)
+
+                img = np.uint8(img*255)
+                img = cv2.resize(img, dsize=(w, h))
+
+                image[top: top+h, left: left+w] = img
+
+            # Draw label
+            pt = tuple([int(width - lab[0]*width), int(lab[1]*height)])
+            cv2.drawMarker(image, pt, 255)
+
+            # Show data
+            cv2.imshow("Review dataset", image)
+            if cv2.waitKey(0) in [27, ord('q')]:
+                break
+
 
 

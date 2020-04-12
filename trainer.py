@@ -17,7 +17,6 @@ class Model:
 
     MODEL_PERCENT_VALIDATION = 0.2
     MODEL_PERCENT_TEST = 0.2
-    MODEL_IMAGE_SIZE = (64, 64)
 
     TRAINING_EPOCHS = 1000
     TRAINING_BATCH_SIZE = 32
@@ -25,14 +24,11 @@ class Model:
     def __init__(self):
         self.image_proc = data_util.ImageProcessor()
 
-    # ----- #
-    # MODEL #
-    # ----- #
     def _define_eye_branch(self):
         """Define the CNN branch for an eye image."""
-        input_eye = tf.keras.layers.Input(self.MODEL_IMAGE_SIZE+(1,))
+        input_eye = tf.keras.layers.Input(self.image_proc.MODEL_IMAGE_SIZE+(1,))
 
-        # eye = tf.keras.layers.Dropout(0.2, input_shape=MODEL_IMAGE_SIZE+(1,)(input_eye)
+        # eye = tf.keras.layers.Dropout(0.2, input_shape=self.image_proc.MODEL_IMAGE_SIZE+(1,)(input_eye)
         eye = input_eye
 
         eye = tf.keras.layers.Conv2D(filters=16, kernel_size=(3, 3), activation='relu')(eye)
@@ -120,97 +116,10 @@ class Model:
 
         return callbacks
 
-    # ---- #
-    # DATA #
-    # ---- #
-    def _parse_eye(self, image, coords):
-        # Get the coordinates
-        left, top, width, height = coords[0], coords[1], coords[2], coords[3]
-        img_height, img_width = tf.shape(image)[0], tf.shape(image)[1]
-
-        # Get the eye image
-        img = tf.image.crop_to_bounding_box(image, top, left, height, width)
-        img = tf.image.resize(img, self.MODEL_IMAGE_SIZE)
-        img = tf.reshape(img, self.MODEL_IMAGE_SIZE + (1,))
-
-        # Normalize the coordinates
-        x = (left + width//2) / img_width
-        y = (top + height//2) / img_height
-        w = width / img_width
-        h = height / img_height
-        coord_out = tf.convert_to_tensor([x, y, w, h], dtype=float)
-
-        return img, coord_out
-
-    def _parse_function(self, path, left_eye_coord, right_eye_coord, label):
-        # Load the image
-        img = tf.io.read_file(path)
-        img = tf.image.decode_png(img)
-        img = tf.image.convert_image_dtype(img, tf.float32)
-
-        # Get the eye images and normalized coordinates
-        left_img, left_coord = self._parse_eye(img, left_eye_coord)
-        right_img, right_coord = self._parse_eye(img, right_eye_coord)
-
-        data = {"input_1": left_img, "input_2": right_img,
-                "input_3": left_coord, "input_4": right_coord}
-        return data, label
-
-    def _initialize_dataset(self):
-        """
-        Initialize a tensorflow dataset pipeline.
-
-        Sources
-        -------
-        For data pipelines
-        https://cs230.stanford.edu/blog/datapipeline/
-
-        # To use python functions
-        https://stackoverflow.com/questions/55606909/how-to-use-tensorflow-dataset-with-opencv-preprocessing
-
-        # For buffer size when shuffling the dataset:
-        https://stackoverflow.com/questions/46444018/meaning-of-buffer-size-in-dataset-map-dataset-prefetch-and-dataset-shuffle/48096625#48096625
-
-        # To split dataset
-        https://stackoverflow.com/questions/51125266/how-do-i-split-tensorflow-datasets/51126863
-
-        # To use TFRECORDS
-        https://medium.com/@moritzkrger/speeding-up-keras-with-tfrecord-datasets-5464f9836c36
-
-        """
-        # Load data
-        data = self.image_proc.load_index()
-        num_data = len(data[0])
-
-        # Initialize dataset
-        # tf.random.set_seed(1)
-        dataset = tf.data.Dataset.from_tensor_slices(data)
-        # dataset = dataset.shuffle(num_data, reshuffle_each_iteration=False)
-        dataset = dataset.map(self._parse_function, num_parallel_calls=2)
-
-        # Split size
-        validation_size = int(self.MODEL_PERCENT_VALIDATION * num_data)
-        test_size = int(self.MODEL_PERCENT_TEST * num_data)
-        train_size = num_data - validation_size - test_size
-
-        # Split dataset
-        data_train = dataset.take(train_size)
-        data_valid = dataset.skip(train_size).take(validation_size)
-        data_test = dataset.skip(train_size + validation_size)
-
-        # Batch
-        data_train = data_train.batch(self.TRAINING_BATCH_SIZE).prefetch(1)
-        data_valid = data_valid.batch(self.TRAINING_BATCH_SIZE).prefetch(1)
-        data_test = data_test.batch(self.TRAINING_BATCH_SIZE).prefetch(1)
-
-        return data_train, data_valid, data_test
-
-    # -------- #
-    # TRAINING #
-    # -------- #
     def train_model(self):
         # Load data
-        data_training, data_validation, data_test = self._initialize_dataset()
+        data_training, data_validation, data_test = self.image_proc.initialize_dataset(
+            self.MODEL_PERCENT_VALIDATION, self.MODEL_PERCENT_TEST, self.TRAINING_BATCH_SIZE)
 
         # Define the model
         model = self._define_model()
