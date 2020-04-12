@@ -367,13 +367,19 @@ class ImageProcessor:
 
         return data_train, data_valid, data_test
 
-    # TODO modify dataset review
-    def review_dataset():
+    def review_dataset(self):
         # Load dataset
-        dataset = load_dataset()
+        data, _, _ = self.initialize_dataset(0, 0, 1)
+        data = data.as_numpy_iterator()
 
         # Draw a frame for each dataset entry
-        for le, re, lec, rec, lab in zip(*dataset):
+        for d in data:
+            # Unpack
+            le, re, lec, rec = d[0].values()
+            le, re = le.reshape(self.MODEL_IMAGE_SIZE), re.reshape(self.MODEL_IMAGE_SIZE)
+            lec, rec = lec[0], rec[0]
+            lab = d[1][0]
+
             # Initialize
             height, width = 480, 640
             image = np.zeros((height, width), dtype=np.uint8)
