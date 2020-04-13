@@ -17,6 +17,7 @@ class Model:
 
     MODEL_PERCENT_VALIDATION = 0.2
     MODEL_PERCENT_TEST = 0.2
+    MODEL_DROPOUT_RATE = 0.15
 
     TRAINING_EPOCHS = 1000
     TRAINING_BATCH_SIZE = 32
@@ -34,25 +35,25 @@ class Model:
         eye = tf.keras.layers.Conv2D(filters=16, kernel_size=(3, 3), activation='relu')(eye)
         # eye = tf.keras.layers.Dropout(0.2)(eye)
         eye = tf.keras.layers.Conv2D(filters=16, kernel_size=(3, 3), activation='relu')(eye)
-        # eye = tf.keras.layers.Dropout(0.2)(eye)
+        eye = tf.keras.layers.Dropout(self.MODEL_DROPOUT_RATE)(eye)
         eye = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(eye)
 
         eye = tf.keras.layers.Conv2D(filters=32, kernel_size=(3, 3), activation='relu')(eye)
         # eye = tf.keras.layers.Dropout(0.2)(eye)
         eye = tf.keras.layers.Conv2D(filters=32, kernel_size=(3, 3), activation='relu')(eye)
-        # eye = tf.keras.layers.Dropout(0.2)(eye)
+        eye = tf.keras.layers.Dropout(self.MODEL_DROPOUT_RATE)(eye)
         eye = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(eye)
 
         eye = tf.keras.layers.Conv2D(filters=64, kernel_size=(3, 3), activation='relu')(eye)
         # eye = tf.keras.layers.Dropout(0.2)(eye)
         eye = tf.keras.layers.Conv2D(filters=64, kernel_size=(3, 3), activation='relu')(eye)
-        # eye = tf.keras.layers.Dropout(0.2)(eye)
+        eye = tf.keras.layers.Dropout(self.MODEL_DROPOUT_RATE)(eye)
         eye = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(eye)
 
-        # eye = tf.keras.layers.Conv2D(filters=128, kernel_size=(3, 3), activation='relu')(eye)
+        # eye = tf.keras.layers.Conv2D(filters=32, kernel_size=(3, 3), activation='relu')(eye)
         # # eye = tf.keras.layers.Dropout(0.2)(eye)
-        # eye = tf.keras.layers.Conv2D(filters=128, kernel_size=(3, 3), activation='relu')(eye)
-        # # eye = tf.keras.layers.Dropout(0.2)(eye)
+        # eye = tf.keras.layers.Conv2D(filters=32, kernel_size=(3, 3), activation='relu')(eye)
+        # # eye = tf.keras.layers.Dropout(self.MODEL_DROPOUT_RATE)(eye)
         # eye = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(eye)
 
         eye = tf.keras.layers.Conv2D(filters=1, kernel_size=(1, 1), activation='relu')(eye)  # Flattening
