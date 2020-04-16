@@ -1,2 +1,2 @@
-# smile-detection
-Training a neural network to detect a smile
+# gaze-tracking
+Model to track gaze position on a screen.
