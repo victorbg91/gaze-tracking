@@ -1,6 +1,9 @@
 # Imports
 import os
 import datetime
+import smtplib
+from email.message import EmailMessage
+import json
 
 import tensorflow as tf
 
@@ -14,6 +17,7 @@ class Model:
     # Constants
     PATH_BASE = os.path.abspath(os.getcwd())
     PATH_BASE_LOGS = os.path.join(PATH_BASE, "model", "logs")
+    PATH_EMAIL_CONFIG = os.path.join(PATH_BASE, "config", "email_config.json")
 
     MODEL_PERCENT_VALIDATION = 0.2
     MODEL_PERCENT_TEST = 0.2
@@ -117,6 +121,37 @@ class Model:
 
         return callbacks
 
+    def _send_email(self, mean_squared_error):
+        """Send email alert."""
+
+        # Load the email configuration
+        with open(self.PATH_EMAIL_CONFIG, "r") as file:
+            email_config = json.load(file)
+
+        # Initialize
+        msg = EmailMessage()
+        msg["Subject"] = "Run finished"
+        msg["From"] = email_config["from"]
+        msg["To"] = email_config["to"]
+
+        # Set message
+        text = "Mean squared error: " + str(round(mean_squared_error, 2))
+        text += "\n\n" + "-"*50
+        text += "\nWe are looking for the following MSE values: "
+        text += "\nThe 'Better-than-noise' threshold = {:0.2f}".format(1/6)
+        text += "\nThe 'Better-than-fixed-guess' threshold = {:0.2f}".format(1/12)
+        text += "\nFor 10% error, we are looking for a MSE of {:0.2f}".format(0.01)
+        msg.set_content(text)
+
+        # Send the email
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.ehlo()
+            server.login(email_config["from"], email_config["password"])
+            server.ehlo()
+
+            server.send_message(msg)
+
     def train_model(self):
         # Load data
         data_training, data_validation, data_test = self.image_proc.initialize_dataset(
@@ -133,15 +168,6 @@ class Model:
         path_run = os.path.join(self.PATH_BASE_LOGS, run_id)
         callbacks = self._define_callbacks(path_run)
 
-        # Print the target values
-        print(" ")
-        print("Training model... ")
-        print("We are looking for the following loss values: ")
-        print("The 'Better-than-noise' threshold: loss = {:0.2f}".format(1/6))
-        print("The 'Better-than-fixed-guess' threshold = {:0.2f}".format(1/12))
-        print("For 10% error, we are looking for a loss of {:0.2f}".format(0.01))
-        print(" ")
-
         # Start the model fit
         model.fit(
             data_training, epochs=self.TRAINING_EPOCHS, validation_data=data_validation,
@@ -149,7 +175,10 @@ class Model:
 
         # Evaluate on the test set
         print("\nResults on the test set")
-        model.evaluate(data_test)
+        result = model.evaluate(data_test)
+
+        # Send alert email
+        self._send_email(result)
 
         # Save the model
         path_save = os.path.join(path_run, "model.h5")
