@@ -6,6 +6,7 @@ from email.message import EmailMessage
 import json
 
 import tensorflow as tf
+from tensorboard.plugins.hparams import api as hp
 
 import data_util
 
@@ -14,61 +15,74 @@ class Model:
 
     """Class for tensorflow model creation, training, and application."""
 
-    # Constants
+    # Paths
     PATH_BASE = os.path.abspath(os.getcwd())
     PATH_BASE_LOGS = os.path.join(PATH_BASE, "model", "logs")
     PATH_EMAIL_CONFIG = os.path.join(PATH_BASE, "config", "email_config.json")
 
+    # Training constants
     MODEL_PERCENT_VALIDATION = 0.2
     MODEL_PERCENT_TEST = 0.2
-    MODEL_DROPOUT_RATE = 0.15
-
     TRAINING_EPOCHS = 1000
-    TRAINING_BATCH_SIZE = 32
+    HP_MAX_TESTS = 10
+
+    # CNN hyperparameters
+    HP_DROPOUT = hp.HParam("dropout", hp.RealInterval(0.05, 0.1))
+    HP_NUM_UNITS = hp.HParam("num_units", hp.Discrete([1, 2, 3, 4]))
+    HP_NUM_LAYERS = hp.HParam("num_layers", hp.Discrete([1, 2, 3]))
+    HP_KERNEL_SIZE = hp.HParam("kernel_size", hp.Discrete([3, 5, 7]))
+
+    # Training hyperparameters
+    HP_BATCH_SIZE = hp.HParam("batch_size", hp.Discrete([32, 64, 128, 256]))
 
     def __init__(self):
         self.image_proc = data_util.ImageProcessor()
 
-    def _define_eye_branch(self):
+    def _define_eye_branch_unit(self, inlayer, level, hparams):
+        """Define one unit of the eye branch."""
+        # Initialize
+        num_layers = hparams[self.HP_NUM_LAYERS]
+        dropout = hparams[self.HP_DROPOUT]
+        filters = 16 * 2**level
+        ks = hparams[self.HP_KERNEL_SIZE]
+
+        # Define the convolution layers
+        outlayer = inlayer
+        for _ in range(num_layers):
+            outlayer = tf.keras.layers.Conv2D(
+                filters=filters, kernel_size=(ks, ks),
+                padding="same", activation='relu')(outlayer)
+
+        # Finish the unit
+        outlayer = tf.keras.layers.Dropout(dropout)(outlayer)
+        outlayer = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(outlayer)
+        return outlayer
+
+    def _define_eye_branch(self, hparams):
         """Define the CNN branch for an eye image."""
+        # Initialize
+        units = hparams[self.HP_NUM_UNITS]
+
+        # Define the branch input
         input_eye = tf.keras.layers.Input(self.image_proc.MODEL_IMAGE_SIZE+(1,))
+        outlayer = input_eye
 
-        # eye = tf.keras.layers.Dropout(0.2, input_shape=self.image_proc.MODEL_IMAGE_SIZE+(1,)(input_eye)
-        eye = input_eye
+        # Stack the CNN units
+        for i in range(units):
+            outlayer = self._define_eye_branch_unit(outlayer, i, hparams)
 
-        eye = tf.keras.layers.Conv2D(filters=16, kernel_size=(3, 3), activation='relu')(eye)
-        # eye = tf.keras.layers.Dropout(0.2)(eye)
-        eye = tf.keras.layers.Conv2D(filters=16, kernel_size=(3, 3), activation='relu')(eye)
-        eye = tf.keras.layers.Dropout(self.MODEL_DROPOUT_RATE)(eye)
-        eye = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(eye)
+        # Finish the eye branch
+        outlayer = tf.keras.layers.Conv2D(filters=1, kernel_size=(1, 1), activation='relu')(outlayer)  # Flattening
+        outlayer = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(outlayer)
+        outlayer = tf.keras.layers.Flatten()(outlayer)
 
-        eye = tf.keras.layers.Conv2D(filters=32, kernel_size=(3, 3), activation='relu')(eye)
-        # eye = tf.keras.layers.Dropout(0.2)(eye)
-        eye = tf.keras.layers.Conv2D(filters=32, kernel_size=(3, 3), activation='relu')(eye)
-        eye = tf.keras.layers.Dropout(self.MODEL_DROPOUT_RATE)(eye)
-        eye = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(eye)
+        return input_eye, outlayer
 
-        eye = tf.keras.layers.Conv2D(filters=64, kernel_size=(3, 3), activation='relu')(eye)
-        # eye = tf.keras.layers.Dropout(0.2)(eye)
-        eye = tf.keras.layers.Conv2D(filters=64, kernel_size=(3, 3), activation='relu')(eye)
-        eye = tf.keras.layers.Dropout(self.MODEL_DROPOUT_RATE)(eye)
-        eye = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(eye)
-
-        # eye = tf.keras.layers.Conv2D(filters=32, kernel_size=(3, 3), activation='relu')(eye)
-        # # eye = tf.keras.layers.Dropout(0.2)(eye)
-        # eye = tf.keras.layers.Conv2D(filters=32, kernel_size=(3, 3), activation='relu')(eye)
-        # # eye = tf.keras.layers.Dropout(self.MODEL_DROPOUT_RATE)(eye)
-        # eye = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(eye)
-
-        eye = tf.keras.layers.Conv2D(filters=1, kernel_size=(1, 1), activation='relu')(eye)  # Flattening
-        eye = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(eye)
-        flat = tf.keras.layers.Flatten()(eye)
-
-        return input_eye, flat
-
-    def _define_model(self):
+    def _define_model(self, hparams):
         """
-        The model for eye-only inputs - the "inspiration" is eye triangulation
+        Define the model for gaze prediction.
+
+        The "inspiration" is eye triangulation
         We start by giving separately the left and right eye
         --> the model may detect in which direction the pupil is aimed
 
@@ -79,15 +93,16 @@ class Model:
         --> This way, the screen-eye distance may be inferred.
         """
         # Define the eye branches
-        input_left_eye, flat_left = self._define_eye_branch()
-        input_right_eye, flat_right = self._define_eye_branch()
+        input_left_eye, flat_left = self._define_eye_branch(hparams)
+        input_right_eye, flat_right = self._define_eye_branch(hparams)
 
         # Define the coordinate inputs
         input_left_coord = tf.keras.layers.Input([4])
         input_right_coord = tf.keras.layers.Input([4])
 
         # Define the main branch
-        main = tf.keras.layers.concatenate([flat_left, flat_right, input_left_coord, input_right_coord])
+        main = tf.keras.layers.concatenate(
+            [flat_left, flat_right, input_left_coord, input_right_coord])
         main = tf.keras.layers.Dense(1000, activation='relu')(main)
         output = tf.keras.layers.Dense(2, activation='linear')(main)
 
@@ -97,7 +112,7 @@ class Model:
             outputs=[output])
         return model
 
-    def _define_callbacks(self, path_run):
+    def _define_callbacks(self, path_run, hparams):
         # Initialize
         callbacks = []
 
@@ -119,9 +134,13 @@ class Model:
             log_dir=path_run, histogram_freq=1, write_graph=True, write_images=True)
         callbacks.append(callback_tensorboard)
 
+        # Hyperparameters
+        callback_hyperparameters = hp.KerasCallback(path_run, hparams)
+        callbacks.append(callback_hyperparameters)
+
         return callbacks
 
-    def _send_email(self, mean_squared_error):
+    def _send_email(self, results):
         """Send email alert."""
 
         # Load the email configuration
@@ -130,17 +149,30 @@ class Model:
 
         # Initialize
         msg = EmailMessage()
-        msg["Subject"] = "Run finished"
+        msg["Subject"] = "Tests finished"
         msg["From"] = email_config["from"]
         msg["To"] = email_config["to"]
 
-        # Set message
-        text = "Mean squared error: " + str(round(mean_squared_error, 2))
+        # Set the message header
+        text = "A new batch of tests is finished."
+
+        text += "\n\nAs a reminder, we are looking for the following MSE values: "
+        text += "\n'Better-than-noise' threshold = {:0.2f}".format(1/6)
+        text += "\n'Better-than-fixed-guess' threshold = {:0.2f}".format(1/12)
+        text += "\nOur objective of 10% error threshold = {:0.2f}".format(0.01)
+
+        # Set the email info
+        keys = sorted(results.keys())[:10]
+        top_params = [results[key] for key in keys]
+        top_params = [{param.name: params[param] for param in params}
+                      for params in top_params]
+
         text += "\n\n" + "-"*50
-        text += "\nWe are looking for the following MSE values: "
-        text += "\nThe 'Better-than-noise' threshold = {:0.2f}".format(1/6)
-        text += "\nThe 'Better-than-fixed-guess' threshold = {:0.2f}".format(1/12)
-        text += "\nFor 10% error, we are looking for a MSE of {:0.2f}".format(0.01)
+        for key, params in zip(keys, top_params):
+            text += "\n\n" + str(round(key, 2))
+            text += "\n" + str(params)
+
+        # Add the text to the email
         msg.set_content(text)
 
         # Send the email
@@ -152,21 +184,21 @@ class Model:
 
             server.send_message(msg)
 
-    def train_model(self):
+    def train_model(self, hparams):
         # Load data
+        batch = hparams[self.HP_BATCH_SIZE]
         data_training, data_validation, data_test = self.image_proc.initialize_dataset(
-            self.MODEL_PERCENT_VALIDATION, self.MODEL_PERCENT_TEST, self.TRAINING_BATCH_SIZE)
+            self.MODEL_PERCENT_VALIDATION, self.MODEL_PERCENT_TEST, batch)
 
         # Define the model
-        model = self._define_model()
+        model = self._define_model(hparams)
         opt = tf.keras.optimizers.Adam(amsgrad=True)
         model.compile(optimizer=opt, loss='mean_squared_error')
-        model.summary()
 
         # Define callbacks
         run_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         path_run = os.path.join(self.PATH_BASE_LOGS, run_id)
-        callbacks = self._define_callbacks(path_run)
+        callbacks = self._define_callbacks(path_run, hparams)
 
         # Start the model fit
         model.fit(
@@ -177,9 +209,23 @@ class Model:
         print("\nResults on the test set")
         result = model.evaluate(data_test)
 
-        # Send alert email
-        self._send_email(result)
+        return result
 
-        # Save the model
-        path_save = os.path.join(path_run, "model.h5")
-        model.save(path_save)
+    def launch_training_batch(self):
+        results = {}
+        for _ in range(self.HP_MAX_TESTS):
+            # Define hyperparameters at random
+            hparams = {
+                self.HP_BATCH_SIZE: self.HP_BATCH_SIZE.domain.sample_uniform(),
+                self.HP_NUM_UNITS: self.HP_NUM_UNITS.domain.sample_uniform(),
+                self.HP_NUM_LAYERS: self.HP_NUM_LAYERS.domain.sample_uniform(),
+                self.HP_KERNEL_SIZE: self.HP_KERNEL_SIZE.domain.sample_uniform(),
+                self.HP_DROPOUT: self.HP_DROPOUT.domain.sample_uniform()
+            }
+
+            # Train the model and append the results
+            res = self.train_model(hparams)
+            results[res] = hparams
+
+        # Send alert email
+        self._send_email(results)

@@ -169,8 +169,8 @@ def parse_inputs():
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--collect-data", action="store_true", help="Collect new data")
     parser.add_argument("-i", "--index-dataset", action="store_true", help="Create a new dataset")
-    parser.add_argument("-t", "--train-model", action="store_true", help="Train the model")
     parser.add_argument("-r", "--review-dataset", action="store_true", help="Review the dataset")
+    parser.add_argument("-b", "--launch-batch", action="store_true", help="Launch a batch of tests")
     return parser.parse_args()
 
 
@@ -191,6 +191,6 @@ if __name__ == "__main__":
         util.index_dataset()
         util.review_dataset()
 
-    if args.train_model:
+    if args.launch_batch:
         util.index_dataset()
-        model.train_model()
+        model.launch_training_batch()

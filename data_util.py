@@ -317,8 +317,7 @@ class ImageProcessor:
         left_img, left_coord = self._parse_eye(img, left_eye_coord)
         right_img, right_coord = self._parse_eye(img, right_eye_coord)
 
-        data = {"input_1": left_img, "input_2": right_img,
-                "input_3": left_coord, "input_4": right_coord}
+        data = (left_img, right_img, left_eye_coord, right_eye_coord)
         return data, label
 
     def initialize_dataset(self, percent_valid, percent_test, batch):
@@ -350,8 +349,8 @@ class ImageProcessor:
         # Initialize dataset
         # TODO add caching
         dataset = tf.data.Dataset.from_tensor_slices(data)
-        dataset = dataset.shuffle(num_data, reshuffle_each_iteration=False)
-        dataset = dataset.map(self._parse_function, num_parallel_calls=2)
+        dataset = dataset.shuffle(num_data, seed=1, reshuffle_each_iteration=False)
+        dataset = dataset.map(self._parse_function, num_parallel_calls=4)
 
         # Split size
         validation_size = int(percent_valid * num_data)
