@@ -126,11 +126,13 @@ class Model:
             save_weights_only=True)
         callbacks.append(callback_checkpoint)
 
-        # Logs
-        path_logs = os.path.join(path_run, "logfile.csv")
-        callback_logger = tf.keras.callbacks.CSVLogger(
-            filename=path_logs, separator=',', append=True)
-        callbacks.append(callback_logger)
+        # Early stopping for two conditions:
+        # 1 - No improvement after 10 epochs
+        # 2 - Loss above 0.08 after 100 epochs
+        callback_early_stopping_1 = tf.keras.callbacks.EarlyStopping(patience=10, mode="min", verbose=2)
+        callback_early_stopping_2 = tf.keras.callbacks.EarlyStopping(patience=200, baseline=0.08, verbose=2)
+        callbacks.append(callback_early_stopping_1)
+        callbacks.append(callback_early_stopping_2)
 
         # Tensorboard
         callback_tensorboard = tf.keras.callbacks.TensorBoard(
@@ -209,7 +211,7 @@ class Model:
         # Start the model fit
         model.fit(
             data_training, epochs=self.TRAINING_EPOCHS, validation_data=data_validation,
-            verbose=1, callbacks=callbacks)
+            verbose=0, callbacks=callbacks)
 
         # Evaluate on the test set
         print("\nResults on the test set")
@@ -218,6 +220,7 @@ class Model:
         return result
 
     def launch_training_batch(self):
+        # Launch the tests
         results = {}
         for _ in range(self.HP_MAX_TESTS):
             # Define hyperparameters at random
@@ -228,6 +231,10 @@ class Model:
                 self.HP_KERNEL_SIZE: self.HP_KERNEL_SIZE.domain.sample_uniform(),
                 self.HP_DROPOUT: self.HP_DROPOUT.domain.sample_uniform()
             }
+
+            # Print a run message
+            msg = {param.name: hparams[param] for param in hparams}
+            print("\nStarting a new model with parameters:\n", msg)
 
             # Train the model and append the results
             res = self.train_model(hparams)
