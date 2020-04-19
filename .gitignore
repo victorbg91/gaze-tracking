@@ -1,6 +1,7 @@
 # Standard ignores
 .idea/
 __pycache__/
+venv/
 
 # Local ignores
 data/

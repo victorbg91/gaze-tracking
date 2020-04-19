@@ -6,6 +6,7 @@ from email.message import EmailMessage
 import json
 
 import tensorflow as tf
+import numpy as np
 from tensorboard.plugins.hparams import api as hp
 
 import data_util
@@ -24,7 +25,7 @@ class Model:
     MODEL_PERCENT_VALIDATION = 0.2
     MODEL_PERCENT_TEST = 0.2
     TRAINING_EPOCHS = 1000
-    HP_MAX_TESTS = 10
+    HP_MAX_TESTS = 100
 
     # CNN hyperparameters
     HP_DROPOUT = hp.HParam("dropout", hp.RealInterval(0.05, 0.1))
@@ -50,8 +51,10 @@ class Model:
         outlayer = inlayer
         for _ in range(num_layers):
             outlayer = tf.keras.layers.Conv2D(
-                filters=filters, kernel_size=(ks, ks),
-                padding="same", activation='relu')(outlayer)
+                filters=filters,
+                kernel_size=(ks, ks),
+                padding="same",
+                activation='relu')(outlayer)
 
         # Finish the unit
         outlayer = tf.keras.layers.Dropout(dropout)(outlayer)
@@ -191,7 +194,10 @@ class Model:
             self.MODEL_PERCENT_VALIDATION, self.MODEL_PERCENT_TEST, batch)
 
         # Define the model
-        model = self._define_model(hparams)
+        try:
+            model = self._define_model(hparams)
+        except ValueError:
+            return np.inf
         opt = tf.keras.optimizers.Adam(amsgrad=True)
         model.compile(optimizer=opt, loss='mean_squared_error')
 
