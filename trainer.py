@@ -32,6 +32,7 @@ class Model:
     HP_NUM_UNITS = hp.HParam("num_units", hp.Discrete([1, 2, 3, 4]))
     HP_NUM_LAYERS = hp.HParam("num_layers", hp.Discrete([1, 2, 3]))
     HP_KERNEL_SIZE = hp.HParam("kernel_size", hp.Discrete([3, 5, 7]))
+    HP_LAST_UNIT_SIZE = hp.HParam("last_unit", hp.Discrete([3, 5, 7, 9, 11]))
 
     # Training hyperparameters
     HP_BATCH_SIZE = hp.HParam("batch_size", hp.Discrete([32, 64, 128, 256]))
@@ -45,20 +46,21 @@ class Model:
         num_layers = hparams[self.HP_NUM_LAYERS]
         dropout = hparams[self.HP_DROPOUT]
         filters = 16 * 2**level
-        ks = hparams[self.HP_KERNEL_SIZE]
+        kernel_size = hparams[self.HP_KERNEL_SIZE]
+        pool_size = self.image_proc.MODEL_IMAGE_SIZE[0] // (hparams[self.HP_LAST_UNIT_SIZE] * hparams[self.HP_NUM_UNITS])
 
         # Define the convolution layers
         outlayer = inlayer
         for _ in range(num_layers):
             outlayer = tf.keras.layers.Conv2D(
                 filters=filters,
-                kernel_size=(ks, ks),
+                kernel_size=(kernel_size, kernel_size),
                 padding="same",
                 activation='relu')(outlayer)
 
         # Finish the unit
         outlayer = tf.keras.layers.Dropout(dropout)(outlayer)
-        outlayer = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(outlayer)
+        outlayer = tf.keras.layers.MaxPool2D(pool_size=(pool_size, pool_size))(outlayer)
         return outlayer
 
     def _define_eye_branch(self, hparams):
@@ -127,10 +129,10 @@ class Model:
         callbacks.append(callback_checkpoint)
 
         # Early stopping for two conditions:
-        # 1 - No improvement after 10 epochs
-        # 2 - Loss above 0.08 after 100 epochs
-        callback_early_stopping_1 = tf.keras.callbacks.EarlyStopping(patience=10, mode="min", verbose=2)
-        callback_early_stopping_2 = tf.keras.callbacks.EarlyStopping(patience=200, baseline=0.08, verbose=2)
+        # 1 - No improvement after 100 epochs
+        # 2 - Loss above 0.08 after 500 epochs
+        callback_early_stopping_1 = tf.keras.callbacks.EarlyStopping(patience=100, mode="min", verbose=2)
+        callback_early_stopping_2 = tf.keras.callbacks.EarlyStopping(patience=500, baseline=0.08, verbose=2)
         callbacks.append(callback_early_stopping_1)
         callbacks.append(callback_early_stopping_2)
 
@@ -223,13 +225,17 @@ class Model:
         # Launch the tests
         results = {}
         for _ in range(self.HP_MAX_TESTS):
+            # Clear the previous session
+            tf.keras.backend.clear_session()
+
             # Define hyperparameters at random
             hparams = {
                 self.HP_BATCH_SIZE: self.HP_BATCH_SIZE.domain.sample_uniform(),
                 self.HP_NUM_UNITS: self.HP_NUM_UNITS.domain.sample_uniform(),
                 self.HP_NUM_LAYERS: self.HP_NUM_LAYERS.domain.sample_uniform(),
                 self.HP_KERNEL_SIZE: self.HP_KERNEL_SIZE.domain.sample_uniform(),
-                self.HP_DROPOUT: self.HP_DROPOUT.domain.sample_uniform()
+                self.HP_DROPOUT: self.HP_DROPOUT.domain.sample_uniform(),
+                self.HP_LAST_UNIT_SIZE: self.HP_LAST_UNIT_SIZE.domain.sample_uniform()
             }
 
             # Print a run message
