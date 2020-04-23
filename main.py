@@ -189,7 +189,7 @@ if __name__ == "__main__":
 
     if args.review_dataset:
         util.index_dataset()
-        util.review_dataset()
+        util.review_dataset(model.MODEL_IMAGE_SIZE)
 
     if args.launch_batch:
         util.index_dataset()

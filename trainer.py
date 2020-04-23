@@ -18,66 +18,61 @@ class Model:
 
     # Paths
     PATH_BASE = os.path.abspath(os.getcwd())
-    PATH_BASE_LOGS = os.path.join(PATH_BASE, "model", "logs")
+    PATH_BASE_LOGS = os.path.join(PATH_BASE, "logs")
     PATH_EMAIL_CONFIG = os.path.join(PATH_BASE, "config", "email_config.json")
 
-    # Training constants
-    MODEL_PERCENT_VALIDATION = 0.2
-    MODEL_PERCENT_TEST = 0.2
+    # Constants
+    DATA_PERCENT_VALIDATION = 0.2
+    DATA_PERCENT_TEST = 0.2
+
+    MODEL_BATCH_SIZE = 64
+    MODEL_IMAGE_SIZE = (64, 64)
+    MODEL_POOL_SIZE = 2
+    MODEL_NUM_LAYERS = 2
+    MODEL_NUM_UNITS = 2
+    MODEL_KERNEL_SIZE = 3
+
     TRAINING_EPOCHS = 1000
-    HP_MAX_TESTS = 100
+    TRAINING_BATCH_SIZE = 128
 
-    # CNN hyperparameters
-    HP_DROPOUT = hp.HParam("dropout", hp.RealInterval(0.05, 0.1))
-    HP_NUM_UNITS = hp.HParam("num_units", hp.Discrete([1, 2, 3, 4]))
-    HP_NUM_LAYERS = hp.HParam("num_layers", hp.Discrete([1, 2, 3]))
-    HP_KERNEL_SIZE = hp.HParam("kernel_size", hp.Discrete([3, 5, 7]))
-    HP_LAST_UNIT_SIZE = hp.HParam("last_unit", hp.Discrete([3, 5, 7, 9, 11]))
-
-    # Training hyperparameters
-    HP_BATCH_SIZE = hp.HParam("batch_size", hp.Discrete([32, 64, 128, 256]))
+    # Hyperparameters
+    HP_MAX_TESTS = 50
+    HP_LEARNING_RATE = hp.HParam("learning_rate_log", hp.RealInterval(-2., 0.))
+    HP_LEARNING_DECAY = hp.HParam("learning_rate_divisor", hp.Discrete([True, False]))
+    HP_LAST_LAYER = hp.HParam("last_layer", hp.Discrete([300, 500, 700]))
+    HP_OPTIMIZER = hp.HParam("optimizer", hp.Discrete(["adam", "sgd"]))
+    HYPERPARAMETERS = [HP_LEARNING_RATE, HP_LEARNING_DIVISOR, HP_LAST_LAYER, HP_OPTIMIZER]
 
     def __init__(self):
         self.image_proc = data_util.ImageProcessor()
 
     def _define_eye_branch_unit(self, inlayer, level, hparams):
         """Define one unit of the eye branch."""
-        # Initialize
-        num_layers = hparams[self.HP_NUM_LAYERS]
-        dropout = hparams[self.HP_DROPOUT]
-        filters = 16 * 2**level
-        kernel_size = hparams[self.HP_KERNEL_SIZE]
-        pool_size = self.image_proc.MODEL_IMAGE_SIZE[0] // (hparams[self.HP_LAST_UNIT_SIZE] * hparams[self.HP_NUM_UNITS])
-
         # Define the convolution layers
         outlayer = inlayer
-        for _ in range(num_layers):
+        filters = 16 * 2 ** level
+        for _ in range(self.MODEL_NUM_LAYERS):
             outlayer = tf.keras.layers.Conv2D(
                 filters=filters,
-                kernel_size=(kernel_size, kernel_size),
-                padding="same",
+                kernel_size=(self.MODEL_KERNEL_SIZE, self.MODEL_KERNEL_SIZE),
+                padding="valid",
                 activation='relu')(outlayer)
 
         # Finish the unit
-        outlayer = tf.keras.layers.Dropout(dropout)(outlayer)
-        outlayer = tf.keras.layers.MaxPool2D(pool_size=(pool_size, pool_size))(outlayer)
+        outlayer = tf.keras.layers.MaxPool2D(pool_size=(self.MODEL_POOL_SIZE, self.MODEL_POOL_SIZE))(outlayer)
         return outlayer
 
     def _define_eye_branch(self, hparams):
-        """Define the CNN branch for an eye image."""
-        # Initialize
-        units = hparams[self.HP_NUM_UNITS]
-
         # Define the branch input
-        input_eye = tf.keras.layers.Input(self.image_proc.MODEL_IMAGE_SIZE+(1,))
+        input_eye = tf.keras.layers.Input(self.MODEL_IMAGE_SIZE+(1,))
         outlayer = input_eye
 
         # Stack the CNN units
-        for i in range(units):
+        for i in range(self.MODEL_NUM_UNITS):
             outlayer = self._define_eye_branch_unit(outlayer, i, hparams)
 
         # Finish the eye branch
-        outlayer = tf.keras.layers.Conv2D(filters=1, kernel_size=(1, 1), activation='relu')(outlayer)  # Flattening
+        outlayer = tf.keras.layers.Conv2D(filters=1, kernel_size=(1, 1), activation='relu')(outlayer)
         outlayer = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(outlayer)
         outlayer = tf.keras.layers.Flatten()(outlayer)
 
@@ -106,9 +101,11 @@ class Model:
         input_right_coord = tf.keras.layers.Input([4])
 
         # Define the main branch
+        last_layer = hparams[self.HP_LAST_LAYER]
         main = tf.keras.layers.concatenate(
             [flat_left, flat_right, input_left_coord, input_right_coord])
-        main = tf.keras.layers.Dense(1000, activation='relu')(main)
+        main = tf.keras.layers.Dense(last_layer, activation='relu')(main)
+        main = tf.keras.layers.Dense(last_layer, activation='relu')(main)
         output = tf.keras.layers.Dense(2, activation='linear')(main)
 
         # Return the model
@@ -131,8 +128,8 @@ class Model:
         # Early stopping for two conditions:
         # 1 - No improvement after 100 epochs
         # 2 - Loss above 0.08 after 500 epochs
-        callback_early_stopping_1 = tf.keras.callbacks.EarlyStopping(patience=100, mode="min", verbose=2)
-        callback_early_stopping_2 = tf.keras.callbacks.EarlyStopping(patience=500, baseline=0.08, verbose=2)
+        callback_early_stopping_1 = tf.keras.callbacks.EarlyStopping(monitor="loss", patience=100, mode="min", verbose=2)
+        callback_early_stopping_2 = tf.keras.callbacks.EarlyStopping(monitor="loss", patience=500, baseline=0.08, verbose=2)
         callbacks.append(callback_early_stopping_1)
         callbacks.append(callback_early_stopping_2)
 
@@ -193,16 +190,28 @@ class Model:
 
     def train_model(self, hparams):
         # Load data
-        batch = hparams[self.HP_BATCH_SIZE]
         data_training, data_validation, data_test = self.image_proc.initialize_dataset(
-            self.MODEL_PERCENT_VALIDATION, self.MODEL_PERCENT_TEST, batch)
+            self.DATA_PERCENT_VALIDATION, self.DATA_PERCENT_TEST,
+            self.TRAINING_BATCH_SIZE, self.MODEL_IMAGE_SIZE)
 
         # Define the model
         try:
             model = self._define_model(hparams)
-        except ValueError:
+            model.summary()
+        except ValueError as err:
+            print("Could not define the model - possibly incompatible hyperparameters.")
+            print("ERROR: ", err)
             return np.inf
-        opt = tf.keras.optimizers.Adam(amsgrad=True)
+
+        # Define the optimizer
+        if hparams[self.HP_OPTIMIZER] == "adam":
+            opt = tf.keras.optimizers.Adam()
+        elif hparams[self.HP_OPTIMIZER] is "sgd":
+            learning_rate = 10 ** hparams[self.HP_LEARNING_RATE]
+            learning_decay = learning_rate/self.TRAINING_EPOCHS if hparams[self.HP_LEARNING_DECAY] else 0.
+            opt = tf.keras.optimizers.SGD(lr=learning_rate, decay=learning_decay)
+
+        # Define the model
         model.compile(optimizer=opt, loss='mean_squared_error')
 
         # Define callbacks
@@ -211,9 +220,19 @@ class Model:
         callbacks = self._define_callbacks(path_run, hparams)
 
         # Start the model fit
-        model.fit(
-            data_training, epochs=self.TRAINING_EPOCHS, validation_data=data_validation,
-            verbose=0, callbacks=callbacks)
+        try:
+            model.fit(
+                data_training, epochs=self.TRAINING_EPOCHS, validation_data=data_validation,
+                verbose=0, callbacks=callbacks)
+        except tf.errors.ResourceExhaustedError as err:
+            print("Error when fitting the model, ran out of memory.")
+            print(err)
+            return np.inf
+        except tf.errors.InvalidArgumentError as err:
+            print("Model had a NaN, possibly explosive gradient problem")
+            print("After inspection, this problem was cause by improper normalization of the inputs.")
+            print(err)
+            return np.inf
 
         # Evaluate on the test set
         print("\nResults on the test set")
@@ -228,15 +247,8 @@ class Model:
             # Clear the previous session
             tf.keras.backend.clear_session()
 
-            # Define hyperparameters at random
-            hparams = {
-                self.HP_BATCH_SIZE: self.HP_BATCH_SIZE.domain.sample_uniform(),
-                self.HP_NUM_UNITS: self.HP_NUM_UNITS.domain.sample_uniform(),
-                self.HP_NUM_LAYERS: self.HP_NUM_LAYERS.domain.sample_uniform(),
-                self.HP_KERNEL_SIZE: self.HP_KERNEL_SIZE.domain.sample_uniform(),
-                self.HP_DROPOUT: self.HP_DROPOUT.domain.sample_uniform(),
-                self.HP_LAST_UNIT_SIZE: self.HP_LAST_UNIT_SIZE.domain.sample_uniform()
-            }
+            # Pick hyperparameters at random
+            hparams = {param: param.domain.sample_uniform() for param in self.HYPERPARAMETERS}
 
             # Print a run message
             msg = {param.name: hparams[param] for param in hparams}

@@ -2,6 +2,7 @@
 import datetime
 import glob
 import os
+import functools
 
 import tensorflow as tf
 from tqdm import tqdm
@@ -28,7 +29,6 @@ class ImageProcessor:
     PATH_INDEX = os.path.join(PATH_DATA, "index.csv")
     PATH_REJECT = os.path.join(PATH_DATA, "reject.csv")
 
-    MODEL_IMAGE_SIZE = (100, 100)
     DATA_NUMBER_COLLECT = 60
 
     SCREEN_WIDTH = 1600
@@ -288,39 +288,44 @@ class ImageProcessor:
     # ------- #
     # DATASET #
     # ------- #
-    def _parse_eye(self, image, coords):
+    def _parse_eye(self, image, coords, size):
         # Get the coordinates
         left, top, width, height = coords[0], coords[1], coords[2], coords[3]
         img_height, img_width = tf.shape(image)[0], tf.shape(image)[1]
 
         # Get the eye image
         img = tf.image.crop_to_bounding_box(image, top, left, height, width)
-        img = tf.image.resize(img, self.MODEL_IMAGE_SIZE)
-        img = tf.reshape(img, self.MODEL_IMAGE_SIZE + (1,))
+        img = tf.image.resize(img, size)
+        img = tf.reshape(img, size + (1,))
+
+        # Cast to float
+        left, top = tf.cast(left, tf.float32), tf.cast(top, tf.float32)
+        width, height = tf.cast(width, tf.float32), tf.cast(height, tf.float32)
+        img_height, img_width = tf.cast(img_height, tf.float32), tf.cast(img_width, tf.float32)
 
         # Normalize the coordinates
-        x = (left + width//2) / img_width
-        y = (top + height//2) / img_height
-        w = width / img_width
-        h = height / img_height
+        x = tf.divide(tf.add(left, tf.divide(width, tf.constant(2, tf.float32))), img_width)
+        y = tf.divide(tf.add(top, tf.divide(height, tf.constant(2, tf.float32))), img_height)
+        w = tf.divide(width, img_width)
+        h = tf.divide(height, img_height)
         coord_out = tf.convert_to_tensor([x, y, w, h], dtype=float)
 
         return img, coord_out
 
-    def _parse_function(self, path, left_eye_coord, right_eye_coord, label):
+    def _parse_function(self, path, left_eye_coord, right_eye_coord, label, size):
         # Load the image
         img = tf.io.read_file(path)
         img = tf.image.decode_png(img)
         img = tf.image.convert_image_dtype(img, tf.float32)
 
         # Get the eye images and normalized coordinates
-        left_img, left_coord = self._parse_eye(img, left_eye_coord)
-        right_img, right_coord = self._parse_eye(img, right_eye_coord)
+        left_img, left_coord = self._parse_eye(img, left_eye_coord, size)
+        right_img, right_coord = self._parse_eye(img, right_eye_coord, size)
 
-        data = (left_img, right_img, left_eye_coord, right_eye_coord)
+        data = (left_img, right_img, left_coord, right_coord)
         return data, label
 
-    def initialize_dataset(self, percent_valid, percent_test, batch):
+    def initialize_dataset(self, percent_valid, percent_test, batch, size):
         """
         Initialize a tensorflow dataset pipeline.
 
@@ -346,11 +351,14 @@ class ImageProcessor:
         data = self._load_index()
         num_data = len(data[0])
 
+        # Define parse function
+        parsefunc = functools.partial(self._parse_function, size=size)
+
         # Initialize dataset
         # TODO add caching
         dataset = tf.data.Dataset.from_tensor_slices(data)
         dataset = dataset.shuffle(num_data, seed=1, reshuffle_each_iteration=False)
-        dataset = dataset.map(self._parse_function, num_parallel_calls=4)
+        dataset = dataset.map(parsefunc, num_parallel_calls=4)
 
         # Split size
         validation_size = int(percent_valid * num_data)
@@ -369,13 +377,13 @@ class ImageProcessor:
 
         return data_train, data_valid, data_test
 
-    def review_dataset(self):
+    def review_dataset(self, size):
         # Load dataset
-        data, _, _ = self.initialize_dataset(0, 0, 1)
-        data = data.as_numpy_iterator()
+        data, _, _ = self.initialize_dataset(0, 0, 1, size)
+        iterator = data.__iter__()
 
         # Draw a frame for each dataset entry
-        for d in data:
+        for d in iterator:
             # Unpack
             le, re, lec, rec = d[0].values()
             le, re = le.reshape(self.MODEL_IMAGE_SIZE), re.reshape(self.MODEL_IMAGE_SIZE)
