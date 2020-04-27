@@ -20,6 +20,7 @@ class Model:
     PATH_BASE = os.path.abspath(os.getcwd())
     PATH_BASE_LOGS = os.path.join(PATH_BASE, "logs")
     PATH_EMAIL_CONFIG = os.path.join(PATH_BASE, "config", "email_config.json")
+    PATH_MODEL = os.path.join(PATH_BASE, "model")
 
     # Constants
     DATA_PERCENT_VALIDATION = 0.2
@@ -41,10 +42,22 @@ class Model:
     HP_LEARNING_DECAY = hp.HParam("learning_rate_divisor", hp.Discrete([True, False]))
     HP_LAST_LAYER = hp.HParam("last_layer", hp.Discrete([300, 500, 700]))
     HP_OPTIMIZER = hp.HParam("optimizer", hp.Discrete(["adam", "sgd"]))
-    HYPERPARAMETERS = [HP_LEARNING_RATE, HP_LEARNING_DIVISOR, HP_LAST_LAYER, HP_OPTIMIZER]
+    HYPERPARAMETERS = [HP_LEARNING_RATE, HP_LEARNING_DECAY, HP_LAST_LAYER, HP_OPTIMIZER]
 
     def __init__(self):
         self.image_proc = data_util.ImageProcessor()
+        self.inferator = None
+
+    def load_model(self):
+        loaded = tf.keras.models.load_model(self.PATH_MODEL) # tf.saved_model.load(self.PATH_MODEL)
+        loaded.summary()
+        inferator = loaded.signatures["serving_default"]
+        self.inferator = inferator
+
+    def predict(self, inputs):
+        assert self.inferator is not None, "Model was not loaded"
+        result = self.inferator(**inputs)["dense_2"].numpy().reshape(-1)
+        return result
 
     def _define_eye_branch_unit(self, inlayer, level, hparams):
         """Define one unit of the eye branch."""
