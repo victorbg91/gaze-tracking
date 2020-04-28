@@ -423,16 +423,21 @@ class ImageProcessor:
 
     def review_dataset(self, size):
         # Load dataset
-        data, _, _ = self.initialize_dataset(0, 0, 1, size)
-        iterator = data.__iter__()
+        dataset, _, _ = self.initialize_dataset(0, 0, 1, size)
+        iterator = iter(dataset)
 
         # Draw a frame for each dataset entry
-        for d in iterator:
-            # Unpack
-            le, re, lec, rec = d[0].values()
-            le, re = le.reshape(self.MODEL_IMAGE_SIZE), re.reshape(self.MODEL_IMAGE_SIZE)
+        for data in iterator:
+            # Unpack the data
+            datapack, label = data
+            le, re, lec, rec = datapack
+
+            # Format the data
+            le = le.numpy().reshape(size)
+            re = re.numpy().reshape(size)
             lec, rec = lec[0], rec[0]
-            lab = d[1][0]
+
+            label = label.numpy()[0]
 
             # Initialize
             height, width = 480, 640
@@ -449,7 +454,9 @@ class ImageProcessor:
                 image[top: top+h, left: left+w] = img
 
             # Draw label
-            pt = tuple([int(width - lab[0]*width), int(lab[1]*height)])
+            x = int(width - label[0] * width)
+            y = int(label[1] * height)
+            pt = (x, y)
             cv2.drawMarker(image, pt, 255)
 
             # Show data
