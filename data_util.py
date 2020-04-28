@@ -334,7 +334,11 @@ class ImageProcessor:
         while True:
             # Grab the next image from the image generator
             frame, eyes = next(image_generator)
-            img = tf.image.convert_image_dtype(frame.reshape((1,) + frame.shape + (1,)), tf.float32)
+
+            # Format the image
+            img = frame / 255.
+            img = img.reshape(img.shape + (1,))
+            img = tf.image.convert_image_dtype(img, tf.float32)
 
             # Check if eye coordinates were found
             if eyes is not None:

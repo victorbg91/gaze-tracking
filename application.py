@@ -65,6 +65,11 @@ class Application:
                 color=[0, 255, 0]
             )
 
+            # Draw a dot for the prediction
+            x = int(prediction[0] * self.util.SCREEN_WIDTH)
+            y = int(prediction[1] * self.util.SCREEN_HEIGHT)
+            cv2.circle(frame, (x, y), 10, [0, 0, 255], -1)
+
             cv2.imshow("Frame", frame)
             if cv2.waitKey(1) == ord("q"):
                 break
