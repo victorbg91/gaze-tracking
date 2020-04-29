@@ -9,4 +9,4 @@ model/
 config/
 notebooks/
 logs/
-archived_logs/
+archived/

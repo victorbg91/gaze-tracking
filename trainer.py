@@ -38,10 +38,11 @@ class Model:
     # Hyperparameters
     HP_MAX_TESTS = 50
     HP_LEARNING_RATE = hp.HParam("learning_rate_log", hp.RealInterval(-2., 0.))
+    HP_REGULARIZATION = hp.HParam("regularization_log", hp.RealInterval(-7., -0.))
     HP_LEARNING_DECAY = hp.HParam("learning_rate_divisor", hp.Discrete([True, False]))
-    HP_LAST_LAYER = hp.HParam("last_layer", hp.Discrete([300, 500, 700]))
-    HP_OPTIMIZER = hp.HParam("optimizer", hp.Discrete(["adam", "sgd"]))
-    HYPERPARAMETERS = [HP_LEARNING_RATE, HP_LEARNING_DIVISOR, HP_LAST_LAYER, HP_OPTIMIZER]
+    HP_LAST_LAYER = hp.HParam("last_layer", hp.Discrete([100, 200, 300, 400, 500]))
+    HP_OPTIMIZER = hp.HParam("optimizer", hp.Discrete(["adam"]))
+    HYPERPARAMETERS = [HP_LEARNING_RATE, HP_LEARNING_DECAY, HP_LAST_LAYER, HP_OPTIMIZER, HP_REGULARIZATION]
 
     def __init__(self):
         self.image_proc = data_util.ImageProcessor()
@@ -51,12 +52,16 @@ class Model:
         # Define the convolution layers
         outlayer = inlayer
         filters = 16 * 2 ** level
+        regul = 10 ** hparams[self.HP_REGULARIZATION]
+
         for _ in range(self.MODEL_NUM_LAYERS):
             outlayer = tf.keras.layers.Conv2D(
                 filters=filters,
                 kernel_size=(self.MODEL_KERNEL_SIZE, self.MODEL_KERNEL_SIZE),
                 padding="valid",
-                activation='relu')(outlayer)
+                activation='relu',
+                kernel_regularizer=tf.keras.regularizers.l2(regul)
+            )(outlayer)
 
         # Finish the unit
         outlayer = tf.keras.layers.MaxPool2D(pool_size=(self.MODEL_POOL_SIZE, self.MODEL_POOL_SIZE))(outlayer)
@@ -122,16 +127,16 @@ class Model:
         path_checkpoint = os.path.join(path_run, "checkpoint.ckpt")
         callback_checkpoint = tf.keras.callbacks.ModelCheckpoint(
             filepath=path_checkpoint, monitor='loss', save_best_only=True, verbose=1,
-            save_weights_only=True)
+            save_weights_only=False)
         callbacks.append(callback_checkpoint)
 
         # Early stopping for two conditions:
         # 1 - No improvement after 100 epochs
         # 2 - Loss above 0.08 after 500 epochs
         callback_early_stopping_1 = tf.keras.callbacks.EarlyStopping(monitor="loss", patience=100, mode="min", verbose=2)
-        callback_early_stopping_2 = tf.keras.callbacks.EarlyStopping(monitor="loss", patience=500, baseline=0.08, verbose=2)
+        # callback_early_stopping_2 = tf.keras.callbacks.EarlyStopping(monitor="loss", patience=500, baseline=0.08, verbose=2)
         callbacks.append(callback_early_stopping_1)
-        callbacks.append(callback_early_stopping_2)
+        # callbacks.append(callback_early_stopping_2)
 
         # Tensorboard
         callback_tensorboard = tf.keras.callbacks.TensorBoard(
