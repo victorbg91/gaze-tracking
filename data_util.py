@@ -308,7 +308,7 @@ class ImageProcessor:
         y = tf.divide(tf.add(top, tf.divide(height, tf.constant(2, tf.float32))), img_height)
         w = tf.divide(width, img_width)
         h = tf.divide(height, img_height)
-        coord_out = tf.convert_to_tensor([x, y, w, h], dtype=float)
+        coord_out = tf.convert_to_tensor([x, y, w, h], dtype=tf.float32)
 
         return img, coord_out
 
@@ -324,6 +324,54 @@ class ImageProcessor:
 
         data = (left_img, right_img, left_coord, right_coord)
         return data, label
+
+    def image_pipeline(self, image_generator, size):
+        """Format the inputs to the model for inference."""
+        # Initialize
+        misfire_counter = 0
+
+        # Start the pipeline
+        while True:
+            # Grab the next image from the image generator
+            frame, eyes = next(image_generator)
+
+            # Format the image
+            img = frame / 255.
+            img = img.reshape(img.shape + (1,))
+            img = tf.image.convert_image_dtype(img, tf.float32)
+
+            # Check if eye coordinates were found
+            if eyes is not None:
+                # Define the coord tensors
+                left_eye_coord = tf.convert_to_tensor(eyes[0, :].astype(int))
+                right_eye_coord = tf.convert_to_tensor(eyes[1, :].astype(int))
+
+                # Get the model inputs
+                left_img, left_coord = self._parse_eye(img, left_eye_coord, size)
+                right_img, right_coord = self._parse_eye(img, right_eye_coord, size)
+
+                # Reshape the tensors for compatibility
+                left_img = tf.reshape(left_img, (1,) + left_img.shape)
+                right_img = tf.reshape(right_img, (1,) + right_img.shape)
+                left_coord = tf.reshape(left_coord, (1,) + left_coord.shape)
+                right_coord = tf.reshape(right_coord, (1,) + right_coord.shape)
+
+                inputs = {
+                    "input_1": left_img, "input_2": right_img,
+                    "input_3": left_coord, "input_4": right_coord}
+
+                # Reset the misfire counter
+                misfire_counter = 0
+
+                yield frame, eyes, inputs
+
+            else:
+                # Increment the misfire counter
+                misfire_counter += 1
+
+            # Stop the program if there were too many consecutive misfires
+            if misfire_counter >= 20:
+                raise RuntimeError("No data was found for 20 frames")
 
     def initialize_dataset(self, percent_valid, percent_test, batch, size):
         """
@@ -379,16 +427,21 @@ class ImageProcessor:
 
     def review_dataset(self, size):
         # Load dataset
-        data, _, _ = self.initialize_dataset(0, 0, 1, size)
-        iterator = data.__iter__()
+        dataset, _, _ = self.initialize_dataset(0, 0, 1, size)
+        iterator = iter(dataset)
 
         # Draw a frame for each dataset entry
-        for d in iterator:
-            # Unpack
-            le, re, lec, rec = d[0].values()
-            le, re = le.reshape(self.MODEL_IMAGE_SIZE), re.reshape(self.MODEL_IMAGE_SIZE)
+        for data in iterator:
+            # Unpack the data
+            datapack, label = data
+            le, re, lec, rec = datapack
+
+            # Format the data
+            le = le.numpy().reshape(size)
+            re = re.numpy().reshape(size)
             lec, rec = lec[0], rec[0]
-            lab = d[1][0]
+
+            label = label.numpy()[0]
 
             # Initialize
             height, width = 480, 640
@@ -405,7 +458,9 @@ class ImageProcessor:
                 image[top: top+h, left: left+w] = img
 
             # Draw label
-            pt = tuple([int(width - lab[0]*width), int(lab[1]*height)])
+            x = int(width - label[0] * width)
+            y = int(label[1] * height)
+            pt = (x, y)
             cv2.drawMarker(image, pt, 255)
 
             # Show data
@@ -413,5 +468,27 @@ class ImageProcessor:
             if cv2.waitKey(0) in [27, ord('q')]:
                 break
 
+    def grabber(self):
+        """
+        Grab images from the webcam and detect eye positions.
 
+        Returns
+        -------
+        eyes : numpy.ndarray
+            Array containing the coordinates of the detected eyes.
 
+        """
+        cap = cv2.VideoCapture(0)
+
+        while True:
+            # Grab the frame
+            ret, frame = cap.read(0)
+            if frame is None:
+                break
+
+            # Detect eyes
+            frame = self._preprocess(frame)
+            eyes = self._detect_eyes(frame)
+            yield frame, eyes
+
+        cap.release()
