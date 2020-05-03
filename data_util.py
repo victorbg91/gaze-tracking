@@ -403,7 +403,6 @@ class ImageProcessor:
         parsefunc = functools.partial(self._parse_function, size=size)
 
         # Initialize dataset
-        # TODO add caching
         dataset = tf.data.Dataset.from_tensor_slices(data)
         dataset = dataset.shuffle(num_data, seed=1, reshuffle_each_iteration=False)
         dataset = dataset.map(parsefunc, num_parallel_calls=4)

@@ -26,10 +26,9 @@ class Model:
     DATA_PERCENT_VALIDATION = 0.2
     DATA_PERCENT_TEST = 0.2
 
-    MODEL_BATCH_SIZE = 64
     MODEL_IMAGE_SIZE = (64, 64)
     MODEL_POOL_SIZE = 2
-    MODEL_NUM_LAYERS = 2
+    MODEL_NUM_LAYERS = 1
     MODEL_NUM_UNITS = 2
     MODEL_KERNEL_SIZE = 3
 
@@ -38,11 +37,11 @@ class Model:
 
     # Hyperparameters
     HP_MAX_TESTS = 50
-    HP_LEARNING_RATE = hp.HParam("learning_rate_log", hp.RealInterval(-2., 0.))
-    HP_REGULARIZATION = hp.HParam("regularization_log", hp.RealInterval(-7., -0.))
-    HP_LEARNING_DECAY = hp.HParam("learning_rate_divisor", hp.Discrete([True, False]))
-    HP_LAST_LAYER = hp.HParam("last_layer", hp.Discrete([100, 200, 300, 400, 500]))
-    HP_OPTIMIZER = hp.HParam("optimizer", hp.Discrete(["adam"]))
+    HP_LEARNING_RATE = hp.HParam("learning_rate_log", hp.RealInterval(-6., -2.))
+    HP_REGULARIZATION = hp.HParam("regularization_log", hp.RealInterval(-8., -3.))
+    HP_LEARNING_DECAY = hp.HParam("learning_rate_divisor", hp.Discrete([True]))
+    HP_LAST_LAYER = hp.HParam("last_layer", hp.Discrete([100, 200, 300]))
+    HP_OPTIMIZER = hp.HParam("optimizer", hp.Discrete(["adam"]))  # "adam", "sgd"
     HYPERPARAMETERS = [HP_LEARNING_RATE, HP_LEARNING_DECAY, HP_LAST_LAYER, HP_OPTIMIZER, HP_REGULARIZATION]
 
     def __init__(self):
@@ -50,7 +49,7 @@ class Model:
         self.inferator = None
 
     def load_model(self):
-        loaded = tf.keras.models.load_model(self.PATH_MODEL) # tf.saved_model.load(self.PATH_MODEL)
+        loaded = tf.keras.models.load_model(self.PATH_MODEL)  # tf.saved_model.load(self.PATH_MODEL)
         loaded.summary()
         inferator = loaded.signatures["serving_default"]
         self.inferator = inferator
@@ -110,6 +109,12 @@ class Model:
         We also want to give the original width and height
         --> This way, the screen-eye distance may be inferred.
         """
+        # TODO implement a way to penalize low kernel variance
+        # TODO implement a way to start training from an already-trained model
+        # TODO implement weight-sharing
+        # Constants
+        regul = 10 ** hparams[self.HP_REGULARIZATION]
+
         # Define the eye branches
         input_left_eye, flat_left = self._define_eye_branch(hparams)
         input_right_eye, flat_right = self._define_eye_branch(hparams)
@@ -122,8 +127,10 @@ class Model:
         last_layer = hparams[self.HP_LAST_LAYER]
         main = tf.keras.layers.concatenate(
             [flat_left, flat_right, input_left_coord, input_right_coord])
-        main = tf.keras.layers.Dense(last_layer, activation='relu')(main)
-        main = tf.keras.layers.Dense(last_layer, activation='relu')(main)
+        main = tf.keras.layers.Dense(
+            last_layer, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(regul))(main)
+        main = tf.keras.layers.Dense(
+            last_layer, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(regul))(main)
         output = tf.keras.layers.Dense(2, activation='linear')(main)
 
         # Return the model
@@ -132,33 +139,40 @@ class Model:
             outputs=[output])
         return model
 
-    def _define_callbacks(self, path_run, hparams):
+    @staticmethod
+    def _define_callbacks(path_run, hparams):
         # Initialize
         callbacks = []
+        monitor = "loss"
 
         # Checkpoints
-        path_checkpoint = os.path.join(path_run, "checkpoint.ckpt")
+        path_checkpoint = os.path.join(path_run, "checkpoint")
         callback_checkpoint = tf.keras.callbacks.ModelCheckpoint(
-            filepath=path_checkpoint, monitor='loss', save_best_only=True, verbose=1,
+            filepath=path_checkpoint, monitor=monitor,
+            save_best_only=True, verbose=1,
             save_weights_only=False)
         callbacks.append(callback_checkpoint)
 
-        # Early stopping for two conditions:
-        # 1 - No improvement after 100 epochs
-        # 2 - Loss above 0.08 after 500 epochs
-        callback_early_stopping_1 = tf.keras.callbacks.EarlyStopping(monitor="loss", patience=100, mode="min", verbose=2)
-        # callback_early_stopping_2 = tf.keras.callbacks.EarlyStopping(monitor="loss", patience=500, baseline=0.08, verbose=2)
+        # Early stopping if there is no improvement over 100 epochs
+        callback_early_stopping_1 = tf.keras.callbacks.EarlyStopping(
+            monitor=monitor, patience=100, mode="min", verbose=2)
         callbacks.append(callback_early_stopping_1)
-        # callbacks.append(callback_early_stopping_2)
 
         # Tensorboard
         callback_tensorboard = tf.keras.callbacks.TensorBoard(
-            log_dir=path_run, histogram_freq=1, write_graph=True, write_images=True)
+            log_dir=path_run, update_freq="epoch", histogram_freq=10,
+            write_graph=True, write_images=False,
+            profile_batch=2, embeddings_freq=100
+        )
         callbacks.append(callback_tensorboard)
 
         # Hyperparameters
         callback_hyperparameters = hp.KerasCallback(path_run, hparams)
         callbacks.append(callback_hyperparameters)
+
+        # TODO implement callback to put images in tensorboard
+        # Source:
+        # https://stackoverflow.com/questions/43784921/how-to-display-custom-images-in-tensorboard-using-keras?rq=1
 
         return callbacks
 
@@ -221,16 +235,20 @@ class Model:
             print("ERROR: ", err)
             return np.inf
 
+        # Define the learning parameters
+        learning_rate = 10 ** hparams[self.HP_LEARNING_RATE]
+        learning_decay = learning_rate/self.TRAINING_EPOCHS if hparams[self.HP_LEARNING_DECAY] else 0.
+
         # Define the optimizer
         if hparams[self.HP_OPTIMIZER] == "adam":
-            opt = tf.keras.optimizers.Adam()
+            opt = tf.keras.optimizers.Adam(lr=learning_rate, decay=learning_decay)
         elif hparams[self.HP_OPTIMIZER] is "sgd":
-            learning_rate = 10 ** hparams[self.HP_LEARNING_RATE]
-            learning_decay = learning_rate/self.TRAINING_EPOCHS if hparams[self.HP_LEARNING_DECAY] else 0.
             opt = tf.keras.optimizers.SGD(lr=learning_rate, decay=learning_decay)
+        else:
+            raise ValueError("Unknown optimizer, expected 'adam' or 'sgd'")
 
         # Define the model
-        model.compile(optimizer=opt, loss='mean_squared_error')
+        model.compile(optimizer=opt, loss='mean_squared_error', metrics=["mean_squared_error"])
 
         # Define callbacks
         run_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -241,7 +259,7 @@ class Model:
         try:
             model.fit(
                 data_training, epochs=self.TRAINING_EPOCHS, validation_data=data_validation,
-                verbose=0, callbacks=callbacks)
+                verbose=2, callbacks=callbacks)
         except tf.errors.ResourceExhaustedError as err:
             print("Error when fitting the model, ran out of memory.")
             print(err)
@@ -274,6 +292,8 @@ class Model:
 
             # Train the model and append the results
             res = self.train_model(hparams)
+            if type(res) is list:
+                res = res[-1]
             results[res] = hparams
 
         # Send alert email
