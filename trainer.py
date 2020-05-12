@@ -37,10 +37,10 @@ class Model:
 
     # Hyperparameters
     HP_MAX_TESTS = 50
-    HP_LEARNING_RATE = hp.HParam("learning_rate_log", hp.RealInterval(-6., -2.))
+    HP_LEARNING_RATE = hp.HParam("learning_rate_log", hp.RealInterval(-4., -3.))
     HP_REGULARIZATION = hp.HParam("regularization_log", hp.RealInterval(-8., -3.))
     HP_LEARNING_DECAY = hp.HParam("learning_rate_divisor", hp.Discrete([True]))
-    HP_LAST_LAYER = hp.HParam("last_layer", hp.Discrete([100, 200, 300]))
+    HP_LAST_LAYER = hp.HParam("last_layer", hp.Discrete([200]))
     HP_OPTIMIZER = hp.HParam("optimizer", hp.Discrete(["adam"]))  # "adam", "sgd"
     HYPERPARAMETERS = [HP_LEARNING_RATE, HP_LEARNING_DECAY, HP_LAST_LAYER, HP_OPTIMIZER, HP_REGULARIZATION]
 
@@ -108,9 +108,9 @@ class Model:
 
         We also want to give the original width and height
         --> This way, the screen-eye distance may be inferred.
+
         """
         # TODO implement a way to penalize low kernel variance
-        # TODO implement a way to start training from an already-trained model
         # TODO implement weight-sharing
         # Constants
         regul = 10 ** hparams[self.HP_REGULARIZATION]
@@ -221,6 +221,9 @@ class Model:
             server.send_message(msg)
 
     def train_model(self, hparams):
+        # Define run options
+        run_options = tf.compat.v1.RunOptions(report_tensor_allocations_upon_oom=True)
+
         # Load data
         data_training, data_validation, data_test = self.image_proc.initialize_dataset(
             self.DATA_PERCENT_VALIDATION, self.DATA_PERCENT_TEST,
@@ -248,7 +251,20 @@ class Model:
             raise ValueError("Unknown optimizer, expected 'adam' or 'sgd'")
 
         # Define the model
-        model.compile(optimizer=opt, loss='mean_squared_error', metrics=["mean_squared_error"])
+        model.compile(
+            optimizer=opt, loss='mean_squared_error', metrics=["mean_squared_error"], options=run_options)
+
+        # Load the weights and create a dictionary of weights
+        imported = tf.saved_model.load(self.PATH_MODEL)
+        weights = {layer.name: layer.numpy() for layer in imported.variables}
+
+        # Initialize the model with the loaded weights
+        for i, layer in enumerate(model.layers):
+            name = layer.name
+            kernel_weights = weights.get(name + "/kernel:0")
+            bias_weights = weights.get(name + "/bias:0")
+            init_weights = [] if kernel_weights is None or bias_weights is None else [kernel_weights, bias_weights]
+            layer.set_weights(init_weights)
 
         # Define callbacks
         run_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
