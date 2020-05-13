@@ -12,6 +12,48 @@ from tensorboard.plugins.hparams import api as hp
 import data_util
 
 
+# Custom block for the eye images
+class EyeBranch(tf.keras.layers.Layer):
+    def __init__(self, kernel_regularization):
+        # Initialize
+        super(EyeBranch, self).__init__()
+
+        # BLOCK A
+        self.A1_conv = tf.keras.layers.Conv2D(
+            filters=16, kernel_size=(3, 3),
+            padding="valid", activation='relu',
+            name="A1_conv",
+            kernel_regularizer=tf.keras.regularizers.l2(kernel_regularization))
+        self.A2_pool = tf.keras.layers.MaxPool2D(pool_size=(2, 2), name="A2_pool")
+
+        # BLOCK B
+        self.B1_conv = tf.keras.layers.Conv2D(
+            filters=32, kernel_size=(3, 3),
+            padding="valid", activation='relu',
+            name="B1_conv",
+            kernel_regularizer=tf.keras.regularizers.l2(kernel_regularization))
+        self.B2_pool = tf.keras.layers.MaxPool2D(pool_size=(2, 2), name="B2_pool")
+
+        # BLOCK C
+        self.C1_conv = tf.keras.layers.Conv2D(
+            filters=1, kernel_size=(1, 1), activation='relu', name="C1_pool")
+        self.C2_pool = tf.keras.layers.MaxPool2D(pool_size=(2, 2), name="C2_pool")
+        self.C3_flat = tf.keras.layers.Flatten(name="C3_pool")
+
+    def call(self, inputs):
+        x = self.A1_conv(inputs)
+        x = self.A2_pool(x)
+
+        x = self.B1_conv(x)
+        x = self.B2_pool(x)
+
+        x = self.C1_conv(x)
+        x = self.C2_pool(x)
+        x = self.C3_flat(x)
+
+        return x
+
+
 class Model:
 
     """Class for tensorflow model creation, training, and application."""
@@ -33,14 +75,14 @@ class Model:
     MODEL_KERNEL_SIZE = 3
 
     TRAINING_EPOCHS = 1000
-    TRAINING_BATCH_SIZE = 128
+    TRAINING_BATCH_SIZE = 64
 
     # Hyperparameters
     HP_MAX_TESTS = 50
     HP_LEARNING_RATE = hp.HParam("learning_rate_log", hp.RealInterval(-4., -3.))
     HP_REGULARIZATION = hp.HParam("regularization_log", hp.RealInterval(-8., -3.))
     HP_LEARNING_DECAY = hp.HParam("learning_rate_divisor", hp.Discrete([True]))
-    HP_LAST_LAYER = hp.HParam("last_layer", hp.Discrete([200]))
+    HP_LAST_LAYER = hp.HParam("last_layer", hp.Discrete([200, 300, 400]))
     HP_OPTIMIZER = hp.HParam("optimizer", hp.Discrete(["adam"]))  # "adam", "sgd"
     HYPERPARAMETERS = [HP_LEARNING_RATE, HP_LEARNING_DECAY, HP_LAST_LAYER, HP_OPTIMIZER, HP_REGULARIZATION]
 
@@ -59,42 +101,6 @@ class Model:
         result = self.inferator(**inputs)["dense_2"].numpy().reshape(-1)
         return result
 
-    def _define_eye_branch_unit(self, inlayer, level, hparams):
-        """Define one unit of the eye branch."""
-        # Define the convolution layers
-        outlayer = inlayer
-        filters = 16 * 2 ** level
-        regul = 10 ** hparams[self.HP_REGULARIZATION]
-
-        for _ in range(self.MODEL_NUM_LAYERS):
-            outlayer = tf.keras.layers.Conv2D(
-                filters=filters,
-                kernel_size=(self.MODEL_KERNEL_SIZE, self.MODEL_KERNEL_SIZE),
-                padding="valid",
-                activation='relu',
-                kernel_regularizer=tf.keras.regularizers.l2(regul)
-            )(outlayer)
-
-        # Finish the unit
-        outlayer = tf.keras.layers.MaxPool2D(pool_size=(self.MODEL_POOL_SIZE, self.MODEL_POOL_SIZE))(outlayer)
-        return outlayer
-
-    def _define_eye_branch(self, hparams):
-        # Define the branch input
-        input_eye = tf.keras.layers.Input(self.MODEL_IMAGE_SIZE+(1,))
-        outlayer = input_eye
-
-        # Stack the CNN units
-        for i in range(self.MODEL_NUM_UNITS):
-            outlayer = self._define_eye_branch_unit(outlayer, i, hparams)
-
-        # Finish the eye branch
-        outlayer = tf.keras.layers.Conv2D(filters=1, kernel_size=(1, 1), activation='relu')(outlayer)
-        outlayer = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(outlayer)
-        outlayer = tf.keras.layers.Flatten()(outlayer)
-
-        return input_eye, outlayer
-
     def _define_model(self, hparams):
         """
         Define the model for gaze prediction.
@@ -110,30 +116,34 @@ class Model:
         --> This way, the screen-eye distance may be inferred.
 
         """
-        # TODO implement a way to penalize low kernel variance
-        # TODO implement weight-sharing
-        # Constants
-        regul = 10 ** hparams[self.HP_REGULARIZATION]
 
-        # Define the eye branches
-        input_left_eye, flat_left = self._define_eye_branch(hparams)
-        input_right_eye, flat_right = self._define_eye_branch(hparams)
+        # Initialize
+        l2_regularization = 10 ** hparams[self.HP_REGULARIZATION]
+        last_layer = hparams[self.HP_LAST_LAYER]
 
-        # Define the coordinate inputs
+        input_left_eye = tf.keras.layers.Input(self.MODEL_IMAGE_SIZE + (1,))
+        input_right_eye = tf.keras.layers.Input(self.MODEL_IMAGE_SIZE + (1,))
         input_left_coord = tf.keras.layers.Input([4])
         input_right_coord = tf.keras.layers.Input([4])
 
+        # Define the weight-sharing eye branch
+        eye_branch = EyeBranch(l2_regularization)
+        flat_left = eye_branch(input_left_eye)
+        flat_right = eye_branch(input_right_eye)
+
         # Define the main branch
-        last_layer = hparams[self.HP_LAST_LAYER]
         main = tf.keras.layers.concatenate(
-            [flat_left, flat_right, input_left_coord, input_right_coord])
+            [flat_left, flat_right, input_left_coord, input_right_coord], name="D1_concat")
         main = tf.keras.layers.Dense(
-            last_layer, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(regul))(main)
+            last_layer, activation='relu', name="D2_dense",
+            kernel_regularizer=tf.keras.regularizers.l2(l2_regularization))(main)
         main = tf.keras.layers.Dense(
-            last_layer, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(regul))(main)
-        output = tf.keras.layers.Dense(2, activation='linear')(main)
+            last_layer, activation='relu', name="D3_dense",
+            kernel_regularizer=tf.keras.regularizers.l2(l2_regularization))(main)
+        output = tf.keras.layers.Dense(2, name="D4_output", activation='linear')(main)
 
         # Return the model
+        # TODO implement a way to penalize low kernel variance
         model = tf.keras.models.Model(
             inputs=[input_left_eye, input_right_eye, input_left_coord, input_right_coord],
             outputs=[output])
