@@ -220,7 +220,7 @@ class Model:
 
             server.send_message(msg)
 
-    def train_model(self, hparams):
+    def train_model(self, hparams, load_weights=False):
         # Define run options
         run_options = tf.compat.v1.RunOptions(report_tensor_allocations_upon_oom=True)
 
@@ -254,17 +254,32 @@ class Model:
         model.compile(
             optimizer=opt, loss='mean_squared_error', metrics=["mean_squared_error"], options=run_options)
 
-        # Load the weights and create a dictionary of weights
-        imported = tf.saved_model.load(self.PATH_MODEL)
-        weights = {layer.name: layer.numpy() for layer in imported.variables}
+        if load_weights:
+            try:
+                # Load the weights and create a dictionary of weights
+                imported = tf.saved_model.load(self.PATH_MODEL)
+                weights = {layer.name: layer.numpy() for layer in imported.variables}
+            except OSError:
+                weights = {}
+                print("WARNING: COULD NOT LOAD MODEL, starting from standard weight initialization")
 
-        # Initialize the model with the loaded weights
-        for i, layer in enumerate(model.layers):
-            name = layer.name
-            kernel_weights = weights.get(name + "/kernel:0")
-            bias_weights = weights.get(name + "/bias:0")
-            init_weights = [] if kernel_weights is None or bias_weights is None else [kernel_weights, bias_weights]
-            layer.set_weights(init_weights)
+            # Initialize the model with the loaded weights
+            for i, layer in enumerate(model.layers):
+                try:
+                    # Get the weight for the layer
+                    name = layer.name
+                    kernel_weights = weights.get(name + "/kernel:0")
+                    bias_weights = weights.get(name + "/bias:0")
+                    if kernel_weights is None or bias_weights is None:
+                        init_weights = []
+                    else:
+                        init_weights = [kernel_weights, bias_weights]
+
+                    # Set the weights
+                    layer.set_weights(init_weights)
+
+                except ValueError:
+                    print("Could not load the weights in the layer: ", layer.name)
 
         # Define callbacks
         run_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -292,7 +307,7 @@ class Model:
 
         return result
 
-    def launch_training_batch(self):
+    def launch_training_batch(self, load_weights=False):
         # Launch the tests
         results = {}
         for _ in range(self.HP_MAX_TESTS):
@@ -307,7 +322,7 @@ class Model:
             print("\nStarting a new model with parameters:\n", msg)
 
             # Train the model and append the results
-            res = self.train_model(hparams)
+            res = self.train_model(hparams, load_weights)
             if type(res) is list:
                 res = res[-1]
             results[res] = hparams
