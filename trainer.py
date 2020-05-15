@@ -12,9 +12,15 @@ from tensorboard.plugins.hparams import api as hp
 import data_util
 
 
-# Custom block for the eye images
 class EyeBranch(tf.keras.layers.Layer):
-    def __init__(self, kernel_regularization):
+
+    """
+
+    Custom block for eye images.
+
+    """
+
+    def __init__(self, regularizer):
         # Initialize
         super(EyeBranch, self).__init__()
 
@@ -23,24 +29,33 @@ class EyeBranch(tf.keras.layers.Layer):
             filters=16, kernel_size=(3, 3),
             padding="valid", activation='relu',
             name="A1_conv",
-            kernel_regularizer=tf.keras.regularizers.l2(kernel_regularization))
+            kernel_regularizer=regularizer
+        )
         self.A2_pool = tf.keras.layers.MaxPool2D(pool_size=(2, 2), name="A2_pool")
 
         # BLOCK B
         self.B1_conv = tf.keras.layers.Conv2D(
-            filters=32, kernel_size=(3, 3),
-            padding="valid", activation='relu',
+            filters=32,
+            kernel_size=(3, 3),
+            padding="valid",
+            activation='relu',
             name="B1_conv",
-            kernel_regularizer=tf.keras.regularizers.l2(kernel_regularization))
+            kernel_regularizer=regularizer
+        )
         self.B2_pool = tf.keras.layers.MaxPool2D(pool_size=(2, 2), name="B2_pool")
 
         # BLOCK C
         self.C1_conv = tf.keras.layers.Conv2D(
-            filters=1, kernel_size=(1, 1), activation='relu', name="C1_pool")
+            filters=1,
+            kernel_size=(1, 1),
+            activation='relu',
+            name="C1_conv",
+            kernel_regularizer=regularizer
+        )
         self.C2_pool = tf.keras.layers.MaxPool2D(pool_size=(2, 2), name="C2_pool")
-        self.C3_flat = tf.keras.layers.Flatten(name="C3_pool")
+        self.C3_flat = tf.keras.layers.Flatten(name="C3_flat")
 
-    def call(self, inputs):
+    def __call__(self, inputs):
         x = self.A1_conv(inputs)
         x = self.A2_pool(x)
 
@@ -52,6 +67,24 @@ class EyeBranch(tf.keras.layers.Layer):
         x = self.C3_flat(x)
 
         return x
+
+
+class VarianceRegularizer(tf.keras.regularizers.Regularizer):
+
+    """
+
+    Custom kernel regularization to penalize low weight variance.
+
+    """
+
+    def __init__(self, alpha):
+        self.alpha = alpha
+
+    def __call__(self, x):
+        return self.alpha * tf.math.reciprocal(tf.math.reduce_variance(x))
+
+    def get_config(self):
+        return {"alpha": float(self.alpha)}
 
 
 class Model:
@@ -80,11 +113,12 @@ class Model:
     # Hyperparameters
     HP_MAX_TESTS = 50
     HP_LEARNING_RATE = hp.HParam("learning_rate_log", hp.RealInterval(-4., -3.))
-    HP_REGULARIZATION = hp.HParam("regularization_log", hp.RealInterval(-8., -3.))
+    HP_VAR_REGULARIZATION = hp.HParam("var_regul_log", hp.RealInterval(-10., -0.))
     HP_LEARNING_DECAY = hp.HParam("learning_rate_divisor", hp.Discrete([True]))
     HP_LAST_LAYER = hp.HParam("last_layer", hp.Discrete([200, 300, 400]))
-    HP_OPTIMIZER = hp.HParam("optimizer", hp.Discrete(["adam"]))  # "adam", "sgd"
-    HYPERPARAMETERS = [HP_LEARNING_RATE, HP_LEARNING_DECAY, HP_LAST_LAYER, HP_OPTIMIZER, HP_REGULARIZATION]
+    HP_OPTIMIZER = hp.HParam("optimizer", hp.Discrete(["adam"]))
+
+    HYPERPARAMETERS = [HP_LEARNING_RATE, HP_LEARNING_DECAY, HP_LAST_LAYER, HP_OPTIMIZER, HP_VAR_REGULARIZATION]
 
     def __init__(self):
         self.image_proc = data_util.ImageProcessor()
@@ -116,18 +150,18 @@ class Model:
         --> This way, the screen-eye distance may be inferred.
 
         """
-
         # Initialize
-        l2_regularization = 10 ** hparams[self.HP_REGULARIZATION]
+        var_regularization = VarianceRegularizer(10 ** hparams[self.HP_VAR_REGULARIZATION])
         last_layer = hparams[self.HP_LAST_LAYER]
 
+        # Input layers
         input_left_eye = tf.keras.layers.Input(self.MODEL_IMAGE_SIZE + (1,))
         input_right_eye = tf.keras.layers.Input(self.MODEL_IMAGE_SIZE + (1,))
         input_left_coord = tf.keras.layers.Input([4])
         input_right_coord = tf.keras.layers.Input([4])
 
         # Define the weight-sharing eye branch
-        eye_branch = EyeBranch(l2_regularization)
+        eye_branch = EyeBranch(var_regularization)
         flat_left = eye_branch(input_left_eye)
         flat_right = eye_branch(input_right_eye)
 
@@ -136,14 +170,13 @@ class Model:
             [flat_left, flat_right, input_left_coord, input_right_coord], name="D1_concat")
         main = tf.keras.layers.Dense(
             last_layer, activation='relu', name="D2_dense",
-            kernel_regularizer=tf.keras.regularizers.l2(l2_regularization))(main)
+            kernel_regularizer=var_regularization)(main)
         main = tf.keras.layers.Dense(
             last_layer, activation='relu', name="D3_dense",
-            kernel_regularizer=tf.keras.regularizers.l2(l2_regularization))(main)
-        output = tf.keras.layers.Dense(2, name="D4_output", activation='linear')(main)
+            kernel_regularizer=var_regularization)(main)
+        output = tf.keras.layers.Dense(2, name="D4_output", activation='sigmoid')(main)
 
         # Return the model
-        # TODO implement a way to penalize low kernel variance
         model = tf.keras.models.Model(
             inputs=[input_left_eye, input_right_eye, input_left_coord, input_right_coord],
             outputs=[output])
@@ -172,7 +205,6 @@ class Model:
         callback_tensorboard = tf.keras.callbacks.TensorBoard(
             log_dir=path_run, update_freq="epoch", histogram_freq=10,
             write_graph=True, write_images=False,
-            profile_batch=2, embeddings_freq=100
         )
         callbacks.append(callback_tensorboard)
 
