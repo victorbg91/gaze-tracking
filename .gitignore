@@ -4,7 +4,7 @@ __pycache__/
 venv/
 
 # Local ignores
-data/
+datasets/
 model/
 config/
 notebooks/

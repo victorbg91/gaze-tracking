@@ -1,9 +1,13 @@
 import argparse
+import os
 
 import trainer
-import data_util
+from dataset import DatasetVBG as Dataset
 from application import Application
 
+PATH_BASE = os.getcwd()
+PATH_DATASET_VBG = os.path.join(PATH_BASE, "datasets", "dataset_vbg")
+PATH_CONFIG = os.path.join(PATH_BASE, "config")
 
 # ------------------ #
 # WEBCAM APPLICATION #
@@ -29,22 +33,22 @@ if __name__ == "__main__":
     args = parse_inputs()
 
     # Initialize
-    util = data_util.ImageProcessor(erase_index=False)
-    model = trainer.Model()
+    dataset = Dataset(PATH_DATASET_VBG, PATH_CONFIG)
+    model = trainer.Model(dataset)
 
     # Check args for actions
     if args.collect_data:
-        util.collect_data()
-        util.index_dataset()
+        dataset.collect_data()
+        dataset.index()
 
     elif args.review_dataset:
-        util.index_dataset()
-        util.review_dataset(model.MODEL_IMAGE_SIZE)
+        dataset.index()
+        dataset.review_dataset(model.MODEL_IMAGE_SIZE)
 
     elif args.launch_batch:
-        util.index_dataset()
+        dataset.index()
         model.launch_training_batch(args.load_model)
 
     elif args.launch_application:
-        app = Application(model, util)
+        app = Application(model, dataset)
         app.run()

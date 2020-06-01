@@ -12,7 +12,7 @@ class Application:
     ----------
     model : trainer.Model
         Object that interfaces with our model
-    util : data_util.ImageProcessor
+    util : dataset.DatasetVBG
         Object that interfaces with the data
 
     """

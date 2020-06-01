@@ -9,8 +9,6 @@ import tensorflow as tf
 import numpy as np
 from tensorboard.plugins.hparams import api as hp
 
-import data_util
-
 
 class EyeBranch(tf.keras.layers.Layer):
 
@@ -120,8 +118,8 @@ class Model:
 
     HYPERPARAMETERS = [HP_LEARNING_RATE, HP_LEARNING_DECAY, HP_LAST_LAYER, HP_OPTIMIZER, HP_VAR_REGULARIZATION]
 
-    def __init__(self):
-        self.image_proc = data_util.ImageProcessor()
+    def __init__(self, dataset):
+        self.image_proc = dataset
         self.inferator = None
 
     def load_model(self):

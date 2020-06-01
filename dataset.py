@@ -1,4 +1,5 @@
 # Imports
+import abc
 import datetime
 import glob
 import os
@@ -10,24 +11,27 @@ import numpy as np
 import cv2
 
 
-class ImageProcessor:
+class DatasetBase(abc.ABC):
+    def __init__(self, path_dataset, path_config):
+        self.path_dataset = path_dataset
 
-    """
-    Utility class for image processing.
+        # Load the eye detection cascade
+        self.PATH_HAAR_EYES = os.path.join(path_config, "haarcascade_eye.xml")
+        self.eye_cascade = cv2.CascadeClassifier(self.PATH_HAAR_EYES)
 
-    Attributes
-    ----------
-    cascade : cv2.CascadeClassifier
-        Haar cascade for eye detection.
+    @abc.abstractmethod
+    def index(self):
+        pass
 
-    """
+    @abc.abstractmethod
+    def initialize_dataset(self, percent_validation, percent_test):
+        ...
+        return data_train, data_val, data_test
 
-    # Constants
-    PATH_DATA = "./data"
-    PATH_CONFIG = "./config"
-    PATH_HAAR_EYES = os.path.join(PATH_CONFIG, "haarcascade_eye.xml")
-    PATH_INDEX = os.path.join(PATH_DATA, "index.csv")
-    PATH_REJECT = os.path.join(PATH_DATA, "reject.csv")
+
+class DataCapture:
+
+    """Class to capture images and label them"""
 
     DATA_NUMBER_COLLECT = 60
 
@@ -35,39 +39,16 @@ class ImageProcessor:
     SCREEN_HEIGHT = 900
     TARGET_SIZE = 5
 
-    def __init__(self, erase_index=False):
-        # Load cascade classifier
-        self.cascade = cv2.CascadeClassifier(self.PATH_HAAR_EYES)
+    def __init__(self, path_dataset):
+        self.path_dataset = path_dataset
 
-        # Erase index if applicable
-        if erase_index:
-            try:
-                os.remove(self.PATH_INDEX)
-            except OSError:
-                pass
-            try:
-                os.remove(self.PATH_REJECT)
-            except OSError:
-                pass
-
-        # Create files if they don't already exist
-        if not os.path.exists(self.PATH_INDEX):
-            with open(self.PATH_INDEX, "a") as _:
-                pass
-        if not os.path.exists(self.PATH_REJECT):
-            with open(self.PATH_REJECT, "a") as _:
-                pass
-
-    # -------- #
-    # RAW DATA #
-    # -------- #
     def collect_data(self):
         """Routine to collect new data."""
         # Set the series name
         series_name = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
         # Checking for conflict with series name
-        list_conflict = glob.glob(os.path.join(self.PATH_DATA, series_name + "*.png"))
+        list_conflict = glob.glob(os.path.join(self.path_dataset, series_name + "*.png"))
         if len(list_conflict) > 0:
             answer = input("Conflict detected with this series name.\nDo you want to delete "
                            + "{} items? [y/N]".format(len(list_conflict)))
@@ -77,7 +58,7 @@ class ImageProcessor:
                 # if True:
                 for f in list_conflict:
                     os.remove(f)
-                os.remove(os.path.join(self.PATH_DATA, series_name + "_labels.csv"))
+                os.remove(os.path.join(self.path_dataset, series_name + "_labels.csv"))
 
             # Abort the program otherwise.
             else:
@@ -125,7 +106,7 @@ class ImageProcessor:
 
             # Saving the image
             labels.append([x_nor, y_nor])
-            nom = os.path.join(self.PATH_DATA, series_name + "_" + str(ind).zfill(4) + ".png")
+            nom = os.path.join(self.path_dataset, series_name + "_" + str(ind).zfill(4) + ".png")
             cv2.imwrite(nom, img_gray)
 
         # Close webcam and instruction window
@@ -133,9 +114,53 @@ class ImageProcessor:
         cv2.destroyAllWindows()
 
         # Save the list of expressions
-        labels_filename = os.path.join(self.PATH_DATA, series_name + "_labels.csv")
+        labels_filename = os.path.join(self.path_dataset, series_name + "_labels.csv")
         np.savetxt(labels_filename, labels, fmt='%f')
 
+
+class DatasetVBG(DatasetBase, DataCapture):
+
+    """
+    Utility class for image processing.
+
+    Attributes
+    ----------
+    eye_cascade : cv2.CascadeClassifier
+        Haar cascade for eye detection.
+
+    """
+
+    def __init__(self, path_dataset, path_config, erase_index=False):
+        # Initialize the parent classes
+        DatasetBase.__init__(DatasetBase, path_dataset, path_config)
+        DataCapture.__init__(DataCapture, path_dataset)
+
+        # Initialize paths
+        self.PATH_INDEX = os.path.join(path_dataset, "index.csv")
+        self.PATH_REJECT = os.path.join(path_dataset, "reject.csv")
+
+        # Erase index if applicable
+        if erase_index:
+            try:
+                os.remove(self.PATH_INDEX)
+            except OSError:
+                pass
+            try:
+                os.remove(self.PATH_REJECT)
+            except OSError:
+                pass
+
+        # Create files if they don't already exist
+        if not os.path.exists(self.PATH_INDEX):
+            with open(self.PATH_INDEX, "a") as _:
+                pass
+        if not os.path.exists(self.PATH_REJECT):
+            with open(self.PATH_REJECT, "a") as _:
+                pass
+
+    # -------- #
+    # RAW DATA #
+    # -------- #
     def _preprocess(self, image):
         """
         Preprocess an image for eye detection.
@@ -171,7 +196,7 @@ class ImageProcessor:
 
         """
         # Detect the eyes and ensure that 2 eyes are detected
-        eyes = self.cascade.detectMultiScale(image)
+        eyes = self.eye_cascade.detectMultiScale(image)
         if type(eyes) is tuple or len(eyes) != 2:
             return None
 
@@ -187,7 +212,7 @@ class ImageProcessor:
     def _generate_filelist(self, verbosity=0):
         """Generate a list of all data with their labels"""
         # Get the name of all the data series
-        series_names = glob.glob(os.path.join(self.PATH_DATA, "*_labels.csv"))
+        series_names = glob.glob(os.path.join(self.path_dataset, "*_labels.csv"))
 
         # Load the paths
         series_paths = [glob.glob(name[:-11] + "_*.png") for name in series_names]
@@ -211,7 +236,7 @@ class ImageProcessor:
                 for p, l in zip(paths, labels)]
         return data
 
-    def index_dataset(self):
+    def index(self):
         """Index all valid training data and index it for use with dataset generator."""
         # Generate the set of already-indexed files
         indexed = []
@@ -373,7 +398,7 @@ class ImageProcessor:
             if misfire_counter >= 20:
                 raise RuntimeError("No data was found for 20 frames")
 
-    def initialize_dataset(self, percent_valid, percent_test, batch, size):
+    def initialize_dataset(self, percent_valid, percent_test, batch, image_size):
         """
         Initialize a tensorflow dataset pipeline.
 
@@ -400,7 +425,7 @@ class ImageProcessor:
         num_data = len(data[0])
 
         # Define parse function
-        parsefunc = functools.partial(self._parse_function, size=size)
+        parsefunc = functools.partial(self._parse_function, size=image_size)
 
         # Initialize dataset
         dataset = tf.data.Dataset.from_tensor_slices(data)
