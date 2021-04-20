@@ -74,7 +74,7 @@ pluggy==0.13.1
 prometheus-client==0.7.1
 prompt-toolkit==2.0.9
 protobuf==3.9.0
-py==1.8.1
+py==1.10.0
 pyasn1==0.4.8
 pyasn1-modules==0.2.7
 pyclipper==1.1.0.post3
