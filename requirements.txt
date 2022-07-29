@@ -50,7 +50,7 @@ Markdown==3.1.1
 MarkupSafe==1.1.1
 matplotlib==3.1.1
 mccabe==0.6.1
-mistune==0.8.4
+mistune==2.0.3
 more-itertools==8.0.2
 mysql-connector==2.2.9
 mysql-connector-python==8.0.17
